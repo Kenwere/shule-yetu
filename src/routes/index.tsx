@@ -47,7 +47,7 @@ function Index() {
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link to="/register" className="bg-gold px-6 py-3 font-bold uppercase tracking-wide text-ink transition-colors hover:bg-gold/85">Register</Link>
-              <Link to="/login" className="border border-paper/30 px-6 py-3 font-bold uppercase tracking-wide transition-colors hover:border-gold hover:text-gold">Staff login</Link>
+              <Link to="/ask" className="border border-paper/30 px-6 py-3 font-bold uppercase tracking-wide transition-colors hover:border-gold hover:text-gold">Ask a question</Link>
             </div>
           </div>
           <img src={crest} alt="St John's Academy crest" width={1024} height={1024} className="aspect-square w-full rotate-2 object-cover outline outline-1 -outline-offset-1 outline-paper/10" />

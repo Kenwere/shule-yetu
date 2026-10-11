@@ -21,6 +21,7 @@ export function SiteHeader() {
           <a href="/#classes" className="hidden hover:text-gold md:inline">Classes</a>
           <a href="/#contact" className="hidden hover:text-gold md:inline">Contact</a>
           <Link to="/ask" className="hover:text-gold">Ask us</Link>
+          {signedIn && <Link to="/dashboard" className="hover:text-gold">Dashboard</Link>}
           <Link to="/login" className="hover:text-gold">Login</Link>
           <Link to="/register" className="bg-ink px-4 py-2 font-bold uppercase tracking-wide text-paper hover:bg-ink-soft">Register</Link>
         </nav>

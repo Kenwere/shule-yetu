@@ -1,5 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { AuthShell, Field, submitClass } from "@/components/AuthShell";
+import { signInMock } from "@/lib/mock-auth";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -14,12 +16,36 @@ export const Route = createFileRoute("/login")({
 });
 
 function Login() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+
   return (
     <AuthShell eyebrow="Staff portal" title="Login">
-      <form onSubmit={(e) => e.preventDefault()}>
-        <Field label="Email" type="email" required autoComplete="email" />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const name = email.split("@")[0]?.replace(/[._-]/g, " ").trim() || "Staff Member";
+          signInMock({
+            name: name.replace(/\b\w/g, (c) => c.toUpperCase()),
+            email,
+            role: "Admin",
+          });
+          navigate({ to: "/dashboard" });
+        }}
+      >
+        <Field
+          label="Email"
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
         <Field label="Password" type="password" required autoComplete="current-password" />
         <button className={submitClass}>Sign in</button>
+        <p className="mt-3 text-xs text-ink-soft">
+          Demo mode: any email and password signs you in.
+        </p>
         <div className="mt-4 flex justify-between text-sm">
           <a className="text-ink-soft hover:text-ink">Forgot password?</a>
           <Link to="/register" className="font-semibold hover:text-gold">Register</Link>

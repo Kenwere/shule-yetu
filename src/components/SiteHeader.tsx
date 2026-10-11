@@ -1,6 +1,11 @@
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { getMockUser } from "@/lib/mock-auth";
 
 export function SiteHeader() {
+  const [signedIn, setSignedIn] = useState(false);
+  useEffect(() => setSignedIn(getMockUser() !== null), []);
+
   return (
     <header className="sticky top-0 z-50 border-b border-ink/10 bg-paper/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -16,6 +21,7 @@ export function SiteHeader() {
           <a href="/#classes" className="hidden hover:text-gold md:inline">Classes</a>
           <a href="/#contact" className="hidden hover:text-gold md:inline">Contact</a>
           <Link to="/ask" className="hover:text-gold">Ask us</Link>
+          {signedIn && <Link to="/dashboard" className="hover:text-gold">Dashboard</Link>}
           <Link to="/login" className="hover:text-gold">Login</Link>
           <Link to="/register" className="bg-ink px-4 py-2 font-bold uppercase tracking-wide text-paper hover:bg-ink-soft">Register</Link>
         </nav>

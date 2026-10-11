@@ -1,6 +1,11 @@
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { getMockUser } from "@/lib/mock-auth";
 
 export function SiteHeader() {
+  const [signedIn, setSignedIn] = useState(false);
+  useEffect(() => setSignedIn(getMockUser() !== null), []);
+
   return (
     <header className="sticky top-0 z-50 border-b border-ink/10 bg-paper/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">

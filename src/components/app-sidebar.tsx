@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getMockUser, signOutMock, type MockUser } from "@/lib/mock-auth";
 
-type PortalPath = LinkProps["to"];
+type PortalPath = NonNullable<LinkProps["to"]>;
 
 const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboard }[] = [
   { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
@@ -60,7 +60,6 @@ export function AppSidebar() {
   useEffect(() => setUser(getMockUser()), []);
 
   const isActive = (url: string) => pathname === url;
-  const portalActive = portalItems.some((item) => isActive(item.url));
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -87,7 +86,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup defaultOpen={portalActive}>
+        <SidebarGroup>
           <SidebarGroupLabel>Staff portal</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -107,7 +106,7 @@ export function AppSidebar() {
 
         <SidebarSeparator className="opacity-60" />
 
-        <SidebarGroup defaultOpen>
+        <SidebarGroup>
           <SidebarGroupLabel>School</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>

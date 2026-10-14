@@ -1,0 +1,167 @@
+import { Link, useNavigate, useRouterState, type LinkProps } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import {
+  CalendarCheck2,
+  GraduationCap,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  MessagesSquare,
+  Receipt,
+  Settings,
+} from "lucide-react";
+
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarSeparator,
+} from "@/components/ui/sidebar";
+import { getMockUser, signOutMock, type MockUser } from "@/lib/mock-auth";
+
+type PortalPath = LinkProps["to"];
+
+const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboard }[] = [
+  { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Students", url: "/students", icon: GraduationCap },
+  { title: "Fees", url: "/fees", icon: Receipt },
+  { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
+  { title: "Settings", url: "/settings", icon: Settings },
+];
+
+const schoolItems: { title: string; url: PortalPath; icon: typeof Home }[] = [
+  { title: "Ask us", url: "/ask", icon: MessagesSquare },
+  { title: "School site", url: "/", icon: Home },
+];
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((part) => part[0] ?? "")
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+export function AppSidebar() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (router) => router.location.pathname });
+  const [user, setUser] = useState<MockUser | null>(null);
+
+  useEffect(() => setUser(getMockUser()), []);
+
+  const isActive = (url: string) => pathname === url;
+  const portalActive = portalItems.some((item) => isActive(item.url));
+
+  return (
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
+      <SidebarHeader className="border-b border-sidebar-border py-4">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" asChild tooltip="St John's Academy">
+              <Link to="/">
+                <div className="grid h-8 w-8 shrink-0 place-items-center bg-gold font-display text-base text-ink">
+                  SJA
+                </div>
+                <div className="flex min-w-0 flex-col leading-none group-data-[collapsible=icon]:hidden">
+                  <span className="truncate font-display text-lg uppercase tracking-tight">
+                    St John's Academy
+                  </span>
+                  <span className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60">
+                    Est. 1964
+                  </span>
+                </div>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+
+      <SidebarContent>
+        <SidebarGroup defaultOpen={portalActive}>
+          <SidebarGroupLabel>Staff portal</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {portalItems.map((item) => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarSeparator className="opacity-60" />
+
+        <SidebarGroup defaultOpen>
+          <SidebarGroupLabel>School</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {schoolItems.map((item) => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border py-4">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              tooltip={user ? `${user.name} — ${user.role}` : "Not signed in"}
+            >
+              <div className="grid h-8 w-8 shrink-0 place-items-center border border-sidebar-border font-mono text-xs text-gold">
+                {user ? initials(user.name) : "–"}
+              </div>
+              <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
+                <span className="truncate text-sm font-semibold">
+                  {user?.name ?? "Not signed in"}
+                </span>
+                <span className="truncate font-mono text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60">
+                  {user?.role ?? "Guest"}
+                </span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Sign out"
+              onClick={() => {
+                signOutMock();
+                navigate({ to: "/" });
+              }}
+            >
+              <LogOut />
+              <span>Sign out</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </Sidebar>
+  );
+}

@@ -12,12 +12,16 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AttendanceRouteImport } from './routes/attendance'
+import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ExamsRouteImport } from './routes/exams'
 import { Route as FeesRouteImport } from './routes/fees'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RegisterRouteImport } from './routes/register'
+import { Route as ReportCardsRouteImport } from './routes/report-cards'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StudentsRouteImport } from './routes/students'
+import { Route as TeachersRouteImport } from './routes/teachers'
 import { Route as ApiAskRouteImport } from './routes/api/ask'
 
 const IndexRoute = IndexRouteImport.update({
@@ -35,9 +39,19 @@ const AttendanceRoute = AttendanceRouteImport.update({
   path: '/attendance',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClassesRoute = ClassesRouteImport.update({
+  id: '/classes',
+  path: '/classes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExamsRoute = ExamsRouteImport.update({
+  id: '/exams',
+  path: '/exams',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeesRoute = FeesRouteImport.update({
@@ -55,6 +69,11 @@ const RegisterRoute = RegisterRouteImport.update({
   path: '/register',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportCardsRoute = ReportCardsRouteImport.update({
+  id: '/report-cards',
+  path: '/report-cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -63,6 +82,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const StudentsRoute = StudentsRouteImport.update({
   id: '/students',
   path: '/students',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeachersRoute = TeachersRouteImport.update({
+  id: '/teachers',
+  path: '/teachers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAskRoute = ApiAskRouteImport.update({
@@ -75,24 +99,32 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
+  '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
+  '/exams': typeof ExamsRoute
   '/fees': typeof FeesRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/report-cards': typeof ReportCardsRoute
   '/settings': typeof SettingsRoute
   '/students': typeof StudentsRoute
+  '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
+  '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
+  '/exams': typeof ExamsRoute
   '/fees': typeof FeesRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/report-cards': typeof ReportCardsRoute
   '/settings': typeof SettingsRoute
   '/students': typeof StudentsRoute
+  '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
 }
 export interface FileRoutesById {
@@ -100,12 +132,16 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
+  '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
+  '/exams': typeof ExamsRoute
   '/fees': typeof FeesRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/report-cards': typeof ReportCardsRoute
   '/settings': typeof SettingsRoute
   '/students': typeof StudentsRoute
+  '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
 }
 export interface FileRouteTypes {
@@ -114,36 +150,48 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/attendance'
+    | '/classes'
     | '/dashboard'
+    | '/exams'
     | '/fees'
     | '/login'
     | '/register'
+    | '/report-cards'
     | '/settings'
     | '/students'
+    | '/teachers'
     | '/api/ask'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/ask'
     | '/attendance'
+    | '/classes'
     | '/dashboard'
+    | '/exams'
     | '/fees'
     | '/login'
     | '/register'
+    | '/report-cards'
     | '/settings'
     | '/students'
+    | '/teachers'
     | '/api/ask'
   id:
     | '__root__'
     | '/'
     | '/ask'
     | '/attendance'
+    | '/classes'
     | '/dashboard'
+    | '/exams'
     | '/fees'
     | '/login'
     | '/register'
+    | '/report-cards'
     | '/settings'
     | '/students'
+    | '/teachers'
     | '/api/ask'
   fileRoutesById: FileRoutesById
 }
@@ -151,12 +199,16 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
   AttendanceRoute: typeof AttendanceRoute
+  ClassesRoute: typeof ClassesRoute
   DashboardRoute: typeof DashboardRoute
+  ExamsRoute: typeof ExamsRoute
   FeesRoute: typeof FeesRoute
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  ReportCardsRoute: typeof ReportCardsRoute
   SettingsRoute: typeof SettingsRoute
   StudentsRoute: typeof StudentsRoute
+  TeachersRoute: typeof TeachersRoute
   ApiAskRoute: typeof ApiAskRoute
 }
 
@@ -183,11 +235,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AttendanceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/classes': {
+      id: '/classes'
+      path: '/classes'
+      fullPath: '/classes'
+      preLoaderRoute: typeof ClassesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams': {
+      id: '/exams'
+      path: '/exams'
+      fullPath: '/exams'
+      preLoaderRoute: typeof ExamsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/fees': {
@@ -211,6 +277,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegisterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/report-cards': {
+      id: '/report-cards'
+      path: '/report-cards'
+      fullPath: '/report-cards'
+      preLoaderRoute: typeof ReportCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -223,6 +296,13 @@ declare module '@tanstack/react-router' {
       path: '/students'
       fullPath: '/students'
       preLoaderRoute: typeof StudentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/teachers': {
+      id: '/teachers'
+      path: '/teachers'
+      fullPath: '/teachers'
+      preLoaderRoute: typeof TeachersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ask': {
@@ -239,12 +319,16 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
   AttendanceRoute: AttendanceRoute,
+  ClassesRoute: ClassesRoute,
   DashboardRoute: DashboardRoute,
+  ExamsRoute: ExamsRoute,
   FeesRoute: FeesRoute,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  ReportCardsRoute: ReportCardsRoute,
   SettingsRoute: SettingsRoute,
   StudentsRoute: StudentsRoute,
+  TeachersRoute: TeachersRoute,
   ApiAskRoute: ApiAskRoute,
 }
 export const routeTree = rootRouteImport

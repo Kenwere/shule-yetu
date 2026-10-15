@@ -9,6 +9,10 @@ import {
   MessagesSquare,
   Receipt,
   Settings,
+  Users,
+  ClipboardList,
+  FileText,
+  Layers,
 } from "lucide-react";
 
 import {
@@ -34,6 +38,10 @@ const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboar
   { title: "Students", url: "/students", icon: GraduationCap },
   { title: "Fees", url: "/fees", icon: Receipt },
   { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
+  { title: "Teachers", url: "/teachers", icon: Users },
+  { title: "Exams & marks", url: "/exams", icon: ClipboardList },
+  { title: "Report cards", url: "/report-cards", icon: FileText },
+  { title: "Classes & fees", url: "/classes", icon: Layers },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 

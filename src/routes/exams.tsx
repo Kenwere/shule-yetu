@@ -75,7 +75,7 @@ function ExamsPage() {
           }}>
             <Label text="Name"><input className={inputCls} value={ne.name} onChange={(e) => setNe({ ...ne, name: e.target.value })} /></Label>
             <div className="grid grid-cols-2 gap-2">
-              <Label text="Class"><select className={inputCls} value={ne.classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setNe({ ...ne, classId: c.id, stream: c.streams[0] }); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
+              <Label text="Class"><select className={inputCls} value={ne.classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setNe({ ...ne, classId: c.id, stream: c.streams[0] ?? "" }); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
               <Label text="Stream"><select className={inputCls} value={ne.stream} onChange={(e) => setNe({ ...ne, stream: e.target.value })}>{classes.find((c) => c.id === ne.classId)!.streams.map((s) => <option key={s}>{s}</option>)}</select></Label>
               <Label text="Start"><input type="date" className={inputCls} value={ne.start} onChange={(e) => setNe({ ...ne, start: e.target.value })} /></Label>
               <Label text="End"><input type="date" className={inputCls} value={ne.end} onChange={(e) => setNe({ ...ne, end: e.target.value })} /></Label>

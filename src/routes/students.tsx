@@ -75,7 +75,7 @@ function StudentsPage() {
             <Label text="Last name"><input className={inputCls} value={form.last} onChange={(e) => setForm({ ...form, last: e.target.value })} /></Label>
             <Label text="Gender"><select className={inputCls} value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as "F" | "M" })}><option>F</option><option>M</option></select></Label>
             <Label text="Date of birth"><input type="date" className={inputCls} value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} /></Label>
-            <Label text="Class"><select className={inputCls} value={form.classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setForm({ ...form, classId: c.id, stream: c.streams[0] }); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
+            <Label text="Class"><select className={inputCls} value={form.classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setForm({ ...form, classId: c.id, stream: c.streams[0] ?? "" }); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
             <Label text="Stream"><select className={inputCls} value={form.stream} onChange={(e) => setForm({ ...form, stream: e.target.value })}>{classes.find((c) => c.id === form.classId)!.streams.map((s) => <option key={s}>{s}</option>)}</select></Label>
             <Label text="Guardian"><input className={inputCls} value={form.guardian} onChange={(e) => setForm({ ...form, guardian: e.target.value })} /></Label>
             <Label text="Phone"><input className={inputCls} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Label>

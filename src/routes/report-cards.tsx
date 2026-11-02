@@ -25,7 +25,7 @@ const grade = (s: number) => (s >= 80 ? "A" : s >= 65 ? "B" : s >= 50 ? "C" : s 
 
 function ReportCards() {
   const active = learners.filter((l) => l.status === "Active");
-  const [adm, setAdm] = useState(active[0].adm);
+  const [adm, setAdm] = useState(active[0]?.adm ?? "");
   const l = learners.find((x) => x.adm === adm)!;
   const cls = classes.find((c) => c.id === l.classId)!;
   const mine = marks.filter((m) => m.adm === adm && m.status === "Approved");
@@ -54,7 +54,7 @@ function ReportCards() {
             <div className="eyebrow mb-2 text-ink-soft">Total marks by term</div>
             <div className="h-56">
               <ResponsiveContainer>
-                <BarChart data={termTotals[adm]}>
+                <BarChart data={termTotals[adm] ?? []}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                   <XAxis dataKey="term" fontSize={12} />
                   <YAxis fontSize={12} />

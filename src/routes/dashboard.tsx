@@ -1,4 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { attendanceTrend, notifications, weeklyPayments } from "@/lib/mock-school";
 import { useEffect, useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { getMockUser, type MockUser } from "@/lib/mock-auth";
@@ -49,14 +51,43 @@ function Dashboard() {
         </div>
       </section>
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {dashboardStats.map((s) => (
-          <div key={s.label} className="border border-ink/10 bg-paper p-5">
-            <div className="eyebrow text-[10px] text-ink-soft">{s.label}</div>
-            <div className="mt-2 font-display text-3xl">{s.value}</div>
-            <div className="mt-1 text-xs text-ink-soft">{s.note}</div>
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[
+          ["Active students", "1,082", ""], ["Inactive students", "8", ""], ["Completed students", "214", ""],
+          ["Fee collected · week", "KES 1.24M", "g"], ["Fee collected · month", "KES 4.9M", "g"], ["Fee collected · year", "KES 18.4M", "g"],
+          ["Fee balance · term", "KES 2.1M", "r"], ["Fee balance · year", "KES 3.6M", "r"],
+        ].map(([label, value, tone]) => (
+          <div key={label} className={`border border-ink/10 p-5 ${tone === "g" ? "bg-collected-soft text-collected" : tone === "r" ? "bg-owed-soft text-owed" : "bg-paper"}`}>
+            <div className="eyebrow text-[10px]">{label}</div>
+            <div className="mt-2 font-display text-3xl">{value}</div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <div className="border border-ink/10 p-5">
+          <h2 className="eyebrow mb-3 text-ink-soft">Payments by week (KES millions)</h2>
+          <div className="h-56"><ResponsiveContainer><BarChart data={weeklyPayments}><CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /><XAxis dataKey="week" fontSize={12} /><YAxis fontSize={12} /><Tooltip /><Bar dataKey="amount" fill="var(--color-collected)" /></BarChart></ResponsiveContainer></div>
+        </div>
+        <div className="border border-ink/10 p-5">
+          <h2 className="eyebrow mb-3 text-ink-soft">Attendance this week (%)</h2>
+          <div className="h-56"><ResponsiveContainer><LineChart data={attendanceTrend}><CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /><XAxis dataKey="day" fontSize={12} /><YAxis domain={[85, 100]} fontSize={12} /><Tooltip /><Line dataKey="rate" stroke="var(--color-ink)" strokeWidth={2} /></LineChart></ResponsiveContainer></div>
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <div className="border border-ink/10 p-5">
+          <h2 className="eyebrow mb-3 text-ink-soft">Notifications</h2>
+          <ul className="space-y-2 text-sm">{notifications.map((n) => <li key={n} className="border-l-2 border-gold pl-3">{n}</li>)}</ul>
+        </div>
+        <div className="border border-ink/10 p-5">
+          <h2 className="eyebrow mb-3 text-ink-soft">Quick actions</h2>
+          <div className="flex flex-wrap gap-2">
+            {([["Add student", "/students"], ["Record payment", "/students"], ["Approve marks", "/exams"], ["Assign teacher", "/teachers"], ["Generate term fees", "/classes"], ["Report cards", "/report-cards"]] as const).map(([t, to]) => (
+              <Link key={t} to={to} className="bg-ink px-3 py-2 text-xs font-bold uppercase tracking-wide text-paper hover:bg-ink-soft">{t}</Link>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="mt-10 grid gap-8 lg:grid-cols-3">

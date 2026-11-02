@@ -23,6 +23,15 @@ export const upcomingEvents = [
   { title: "Term 2 mid-term break", date: "23–27 Oct" },
   { title: "Inter-house athletics", date: "6 Nov" },
   { title: "Parents' day — Junior School", date: "13 Nov" },
+  { title: "Swimming gala", date: "20 Nov" },
+  { title: "Prize-giving day", date: "28 Nov" },
+];
+
+// Mock announcements for the dashboard notice board.
+export const announcements = [
+  { title: "Term 2 fee statements sent", body: "Statements are now with all guardians via SMS.", date: "Today" },
+  { title: "Sports kit handover", body: "Collect athletics kits at the PE office this week.", date: "Mon" },
+  { title: "Staff meeting", body: "All teaching staff, main hall, 4:00pm.", date: "Fri" },
 ];
 
 // Mock student register.

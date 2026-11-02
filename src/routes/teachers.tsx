@@ -26,7 +26,7 @@ function TeachersPage() {
   const [flash, setFlash] = useState<string | null>(null);
   const [nt, setNt] = useState({ name: "", email: "", phone: "" });
   const [classId, setClassId] = useState(classes[0]!.id);
-  const [stream, setStream] = useState(classes[0].streams[0] ?? "");
+  const [stream, setStream] = useState(classes[0]!.streams[0] ?? "");
   const [subjects, setSubjects] = useState<string[]>([]);
   const cls = classes.find((c) => c.id === classId)!;
   const teacher = list.find((t) => t.id === sel);

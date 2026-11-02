@@ -25,8 +25,8 @@ function TeachersPage() {
   const [sel, setSel] = useState("t1");
   const [flash, setFlash] = useState<string | null>(null);
   const [nt, setNt] = useState({ name: "", email: "", phone: "" });
-  const [classId, setClassId] = useState(classes[0].id);
-  const [stream, setStream] = useState(classes[0].streams[0]);
+  const [classId, setClassId] = useState(classes[0]!.id);
+  const [stream, setStream] = useState(classes[0]!.streams[0] ?? "");
   const [subjects, setSubjects] = useState<string[]>([]);
   const cls = classes.find((c) => c.id === classId)!;
   const teacher = list.find((t) => t.id === sel);
@@ -67,14 +67,14 @@ function TeachersPage() {
               {(assign[teacher.id] ?? []).map((a, i) => (
                 <div key={i} className="flex items-center justify-between border border-ink/10 p-3 text-sm">
                   <div><b>{className(a.classId)} {a.stream}</b> · {a.subjects.join(", ")}</div>
-                  <button className={btn("bad")} onClick={() => setAssign({ ...assign, [teacher.id]: assign[teacher.id].filter((_, j) => j !== i) })}>Remove</button>
+                  <button className={btn("bad")} onClick={() => setAssign({ ...assign, [teacher.id]: (assign[teacher.id] ?? []).filter((_, j) => j !== i) })}>Remove</button>
                 </div>
               ))}
             </div>
           </Panel>
           <Panel title="Assign class & subjects">
             <div className="space-y-3">
-              <Label text="Class"><select className={inputCls} value={classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setClassId(c.id); setStream(c.streams[0]); setSubjects([]); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
+              <Label text="Class"><select className={inputCls} value={classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setClassId(c.id); setStream(c.streams[0] ?? ""); setSubjects([]); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
               <Label text="Stream"><select className={inputCls} value={stream} onChange={(e) => setStream(e.target.value)}>{cls.streams.map((s) => <option key={s}>{s}</option>)}</select></Label>
               <div className="grid grid-cols-2 gap-1 text-sm">
                 {cls.subjects.map((s) => (

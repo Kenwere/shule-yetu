@@ -8,9 +8,9 @@ import { classes, className, learnerName, learners, seedMarks, termTotals } from
 export const Route = createFileRoute("/report-cards")({
   head: () => ({
     meta: [
-      { title: "Report cards — St John's Academy" },
+      { title: "Report cards — Shule Yetu" },
       { name: "description", content: "Printable learner report cards with term performance charts." },
-      { property: "og:title", content: "Report cards — St John's Academy" },
+      { property: "og:title", content: "Report cards — Shule Yetu" },
       { property: "og:description", content: "Printable learner report cards with term performance charts." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -37,7 +37,7 @@ function ReportCards() {
       </div>
       <Panel>
         <div className="flex flex-wrap items-end justify-between gap-2 border-b border-ink/10 pb-4">
-          <div><div className="font-display text-3xl uppercase">St John's Academy</div><div className="eyebrow text-ink-soft">Learner report card · 2026</div></div>
+          <div><div className="font-display text-3xl uppercase">Shule Yetu</div><div className="eyebrow text-ink-soft">Learner report card · 2026</div></div>
           <div className="text-right text-sm"><b>{learnerName(l)}</b><br />{l.adm} · {className(l.classId)} {l.stream}</div>
         </div>
         <div className="mt-4 grid gap-6 lg:grid-cols-2">

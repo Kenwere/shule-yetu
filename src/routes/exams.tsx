@@ -7,9 +7,9 @@ import { classes, className, exams as seedExams, learnerName, learners, seedMark
 export const Route = createFileRoute("/exams")({
   head: () => ({
     meta: [
-      { title: "Exams & marks — St John's Academy" },
+      { title: "Exams & marks — Shule Yetu" },
       { name: "description", content: "Create exams, approve marks and print ranked exam reports." },
-      { property: "og:title", content: "Exams & marks — St John's Academy" },
+      { property: "og:title", content: "Exams & marks — Shule Yetu" },
       { property: "og:description", content: "Create exams, approve marks and print ranked exam reports." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

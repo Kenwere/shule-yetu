@@ -7,9 +7,9 @@ import { classes, className, teacherAssignments, teachers as seed, type Assignme
 export const Route = createFileRoute("/teachers")({
   head: () => ({
     meta: [
-      { title: "Teachers — St John's Academy" },
+      { title: "Teachers — Shule Yetu" },
       { name: "description", content: "Teachers and their class, stream and subject assignments." },
-      { property: "og:title", content: "Teachers — St John's Academy" },
+      { property: "og:title", content: "Teachers — Shule Yetu" },
       { property: "og:description", content: "Teachers and their class, stream and subject assignments." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

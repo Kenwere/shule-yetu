@@ -5,10 +5,10 @@ import { attendanceToday } from "@/lib/mock-data";
 export const Route = createFileRoute("/attendance")({
   head: () => ({
     meta: [
-      { title: "Attendance — St John's Academy" },
-      { name: "description", content: "Daily attendance register for St John's Academy." },
-      { property: "og:title", content: "Attendance — St John's Academy" },
-      { property: "og:description", content: "Daily attendance register for St John's Academy." },
+      { title: "Attendance — Shule Yetu" },
+      { name: "description", content: "Daily attendance register for Shule Yetu." },
+      { property: "og:title", content: "Attendance — Shule Yetu" },
+      { property: "og:description", content: "Daily attendance register for Shule Yetu." },
       { property: "og:type", content: "website" },
       { name: "robots", content: "noindex" },
     ],

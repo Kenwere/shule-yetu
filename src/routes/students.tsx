@@ -7,9 +7,9 @@ import { classes, className, kes, learnerName, learners as seed, seedLedger, typ
 export const Route = createFileRoute("/students")({
   head: () => ({
     meta: [
-      { title: "Students — St John's Academy" },
+      { title: "Students — Shule Yetu" },
       { name: "description", content: "Student register, fee ledger, payments and statements." },
-      { property: "og:title", content: "Students — St John's Academy" },
+      { property: "og:title", content: "Students — Shule Yetu" },
       { property: "og:description", content: "Student register, fee ledger, payments and statements." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -49,7 +49,7 @@ function StudentsPage() {
       setList((ls) => ls.map((l) => (l.adm === form.adm ? form : l)));
       setFlash(`${learnerName(form)} updated.`);
     } else {
-      const adm = `SJA-${2100 + list.length}`;
+      const adm = `SY-${2100 + list.length}`;
       setList((ls) => [...ls, { ...form, adm }]);
       setFlash(`${learnerName(form)} admitted as ${adm}.`);
     }
@@ -169,7 +169,7 @@ function LedgerPanel({ learner, rows, onAdd }: { learner: Learner; rows: LedgerR
         </Panel>
         {receipt && (
           <Panel title="Receipt" action={<PrintButton label="Print receipt" />}>
-            <div className="font-display text-xl uppercase">St John's Academy</div>
+            <div className="font-display text-xl uppercase">Shule Yetu</div>
             <div className="mt-2 space-y-1 text-sm">
               <div>Received from: <b>{learner.guardian}</b> for {learnerName(learner)} ({learner.adm})</div>
               <div>Amount: <b>{kes(receipt.credit)}</b></div>

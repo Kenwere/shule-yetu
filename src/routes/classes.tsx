@@ -7,9 +7,9 @@ import { classes as seed, kes, learners, type ClassDef } from "@/lib/mock-school
 export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: [
-      { title: "Classes & fees — St John's Academy" },
+      { title: "Classes & fees — Shule Yetu" },
       { name: "description", content: "Set up classes, streams, subjects and term fees." },
-      { property: "og:title", content: "Classes & fees — St John's Academy" },
+      { property: "og:title", content: "Classes & fees — Shule Yetu" },
       { property: "og:description", content: "Set up classes, streams, subjects and term fees." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

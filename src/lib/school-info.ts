@@ -1,6 +1,6 @@
 // Mock published school information used to ground the admissions assistant.
 export const schoolInfo = {
-  name: "St John's Academy",
+  name: "Shule Yetu",
   location: "Nairobi, Kenya",
   founded: 1964,
   motto: "Discipline · Drive · Distinction",
@@ -21,7 +21,7 @@ export const schoolInfo = {
   ],
   contact: {
     phone: "+254 700 114 900",
-    email: "admissions@stjohns.ac.ke",
+    email: "admissions@shuleyetu.ac.ke",
     hours: "Mon–Fri, 7am–5pm",
     address: "Nairobi, Kenya",
   },

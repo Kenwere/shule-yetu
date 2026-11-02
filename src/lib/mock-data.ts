@@ -23,18 +23,27 @@ export const upcomingEvents = [
   { title: "Term 2 mid-term break", date: "23–27 Oct" },
   { title: "Inter-house athletics", date: "6 Nov" },
   { title: "Parents' day — Junior School", date: "13 Nov" },
+  { title: "Swimming gala", date: "20 Nov" },
+  { title: "Prize-giving day", date: "28 Nov" },
+];
+
+// Mock announcements for the dashboard notice board.
+export const announcements = [
+  { title: "Term 2 fee statements sent", body: "Statements are now with all guardians via SMS.", date: "Today" },
+  { title: "Sports kit handover", body: "Collect athletics kits at the PE office this week.", date: "Mon" },
+  { title: "Staff meeting", body: "All teaching staff, main hall, 4:00pm.", date: "Fri" },
 ];
 
 // Mock student register.
 export const students = [
-  { id: "SJA-2041", name: "Amina Otieno", class: "Grade 7 East", status: "Active", guardian: "J. Otieno", balance: 0 },
-  { id: "SJA-2042", name: "Brian Mwangi", class: "Grade 10 West", status: "Active", guardian: "P. Mwangi", balance: 12500 },
-  { id: "SJA-2043", name: "Cynthia Achieng", class: "Grade 4 North", status: "Active", guardian: "R. Achieng", balance: 0 },
-  { id: "SJA-2044", name: "David Kamau", class: "Grade 12 East", status: "Active", guardian: "M. Kamau", balance: 35000 },
-  { id: "SJA-2045", name: "Esther Wanjiru", class: "Grade 1 South", status: "Active", guardian: "S. Wanjiru", balance: 0 },
-  { id: "SJA-1988", name: "Felix Kiptoo", class: "Grade 9 North", status: "Inactive", guardian: "L. Kiptoo", balance: 35000 },
-  { id: "SJA-1712", name: "Grace Auma", class: "Grade 12 West", status: "Completed", guardian: "D. Auma", balance: 0 },
-  { id: "SJA-1713", name: "Hassan Ali", class: "Grade 12 East", status: "Completed", guardian: "A. Ali", balance: 0 },
+  { id: "SY-2041", name: "Amina Otieno", class: "Grade 7 East", status: "Active", guardian: "J. Otieno", balance: 0 },
+  { id: "SY-2042", name: "Brian Mwangi", class: "Grade 10 West", status: "Active", guardian: "P. Mwangi", balance: 12500 },
+  { id: "SY-2043", name: "Cynthia Achieng", class: "Grade 4 North", status: "Active", guardian: "R. Achieng", balance: 0 },
+  { id: "SY-2044", name: "David Kamau", class: "Grade 12 East", status: "Active", guardian: "M. Kamau", balance: 35000 },
+  { id: "SY-2045", name: "Esther Wanjiru", class: "Grade 1 South", status: "Active", guardian: "S. Wanjiru", balance: 0 },
+  { id: "SY-1988", name: "Felix Kiptoo", class: "Grade 9 North", status: "Inactive", guardian: "L. Kiptoo", balance: 35000 },
+  { id: "SY-1712", name: "Grace Auma", class: "Grade 12 West", status: "Completed", guardian: "D. Auma", balance: 0 },
+  { id: "SY-1713", name: "Hassan Ali", class: "Grade 12 East", status: "Completed", guardian: "A. Ali", balance: 0 },
 ];
 
 // Mock fee ledger for the current term.

@@ -6,9 +6,9 @@ import { signInMock } from "@/lib/mock-auth";
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Staff Login — St John's Academy" },
-      { name: "description", content: "Sign in to the St John's Academy management portal." },
-      { property: "og:title", content: "Staff Login — St John's Academy" },
+      { title: "Staff Login — Shule Yetu" },
+      { name: "description", content: "Sign in to the Shule Yetu management portal." },
+      { property: "og:title", content: "Staff Login — Shule Yetu" },
       { property: "og:description", content: "Sign in to the school management portal." },
     ],
   }),

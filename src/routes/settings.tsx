@@ -6,10 +6,10 @@ import { schoolInfo } from "@/lib/school-info";
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
-      { title: "School settings — St John's Academy" },
-      { name: "description", content: "School settings for St John's Academy." },
-      { property: "og:title", content: "School settings — St John's Academy" },
-      { property: "og:description", content: "School settings for St John's Academy." },
+      { title: "School settings — Shule Yetu" },
+      { name: "description", content: "School settings for Shule Yetu." },
+      { property: "og:title", content: "School settings — Shule Yetu" },
+      { property: "og:description", content: "School settings for Shule Yetu." },
       { property: "og:type", content: "website" },
       { name: "robots", content: "noindex" },
     ],
@@ -86,7 +86,7 @@ function SettingsPage() {
           </div>
           <div className="mt-4 flex items-center gap-4 border border-dashed border-ink/20 p-4">
             <div className="grid h-12 w-12 shrink-0 place-items-center bg-ink font-display text-lg text-gold">
-              SJA
+              SY
             </div>
             <div className="text-sm text-ink-soft">
               School logo — upload is not wired up yet, so the crest above stays.

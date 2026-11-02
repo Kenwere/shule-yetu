@@ -67,10 +67,10 @@ export function seedLedger(adm: string): LedgerRow[] {
 }
 
 export const teachers = [
-  { id: "t1", name: "Mary Achieng", email: "m.achieng@stjohns.example", phone: "0722 100 201" },
-  { id: "t2", name: "John Kariuki", email: "j.kariuki@stjohns.example", phone: "0722 100 202" },
-  { id: "t3", name: "Ruth Nyambura", email: "r.nyambura@stjohns.example", phone: "0722 100 203" },
-  { id: "t4", name: "Samuel Odhiambo", email: "s.odhiambo@stjohns.example", phone: "0722 100 204" },
+  { id: "t1", name: "Mary Achieng", email: "m.achieng@shuleyetu.example", phone: "0722 100 201" },
+  { id: "t2", name: "John Kariuki", email: "j.kariuki@shuleyetu.example", phone: "0722 100 202" },
+  { id: "t3", name: "Ruth Nyambura", email: "r.nyambura@shuleyetu.example", phone: "0722 100 203" },
+  { id: "t4", name: "Samuel Odhiambo", email: "s.odhiambo@shuleyetu.example", phone: "0722 100 204" },
 ];
 
 export type Assignment = { classId: string; stream: string; subjects: string[] };
@@ -149,7 +149,7 @@ export const recentRegistrations = [
 export const notifications = [
   "6 marks from Term 3 Opener (Grade 7 East) are waiting for approval.",
   "Term 3 fee obligations were generated for 1,082 active learners.",
-  "3 failed sign-in attempts on admin@stjohns.example yesterday.",
+  "3 failed sign-in attempts on admin@shuleyetu.example yesterday.",
 ];
 
 export const kes = (n: number) => `KES ${n.toLocaleString("en-KE")}`;

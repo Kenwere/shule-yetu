@@ -8,9 +8,9 @@ import { SiteHeader } from "@/components/SiteHeader";
 export const Route = createFileRoute("/ask")({
   head: () => ({
     meta: [
-      { title: "Ask Admissions — St John's Academy" },
-      { name: "description", content: "Ask our AI-powered admissions assistant about St John's Academy's vision, classes and contacts." },
-      { property: "og:title", content: "Ask Admissions — St John's Academy" },
+      { title: "Ask Admissions — Shule Yetu" },
+      { name: "description", content: "Ask our AI-powered admissions assistant about Shule Yetu's vision, classes and contacts." },
+      { property: "og:title", content: "Ask Admissions — Shule Yetu" },
       { property: "og:description", content: "Instant answers for prospective families." },
     ],
   }),
@@ -56,7 +56,7 @@ function Ask() {
         <div className="space-y-4">
           {messages.map((m) => (
             <div key={m.id} className={m.role === "user" ? "ml-auto max-w-[80%] bg-ink p-4 text-paper" : "max-w-[90%] border-l-4 border-gold bg-secondary p-4"}>
-              <div className="eyebrow mb-1 text-[10px] opacity-60">{m.role === "user" ? "You" : "St John's"}</div>
+              <div className="eyebrow mb-1 text-[10px] opacity-60">{m.role === "user" ? "You" : "Shule Yetu"}</div>
               <div className="prose-sm space-y-2 text-sm leading-relaxed [&_ul]:list-disc [&_ul]:pl-5">
                 {m.parts.map((p, i) => (p.type === "text" ? <ReactMarkdown key={i}>{p.text}</ReactMarkdown> : null))}
               </div>

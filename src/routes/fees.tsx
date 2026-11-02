@@ -5,10 +5,10 @@ import { feeLedger, feeSummary } from "@/lib/mock-data";
 export const Route = createFileRoute("/fees")({
   head: () => ({
     meta: [
-      { title: "Fees — St John's Academy" },
-      { name: "description", content: "Fee summary and ledger for St John's Academy." },
-      { property: "og:title", content: "Fees — St John's Academy" },
-      { property: "og:description", content: "Fee summary and ledger for St John's Academy." },
+      { title: "Fees — Shule Yetu" },
+      { name: "description", content: "Fee summary and ledger for Shule Yetu." },
+      { property: "og:title", content: "Fees — Shule Yetu" },
+      { property: "og:description", content: "Fee summary and ledger for Shule Yetu." },
       { property: "og:type", content: "website" },
       { name: "robots", content: "noindex" },
     ],

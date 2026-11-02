@@ -32,14 +32,14 @@ export type Learner = {
 };
 
 export const learners: Learner[] = [
-  { adm: "SJA-2041", first: "Amina", last: "Otieno", gender: "F", dob: "2013-03-14", classId: "g7", stream: "East", guardian: "J. Otieno", phone: "0712 000 101", address: "Kisumu", admitted: "2020-01-08", status: "Active" },
-  { adm: "SJA-2046", first: "Kevin", last: "Barasa", gender: "M", dob: "2013-07-02", classId: "g7", stream: "East", guardian: "T. Barasa", phone: "0712 000 102", address: "Kakamega", admitted: "2020-01-08", status: "Active" },
-  { adm: "SJA-2047", first: "Lilian", last: "Chebet", gender: "F", dob: "2013-11-21", classId: "g7", stream: "East", guardian: "E. Chebet", phone: "0712 000 103", address: "Eldoret", admitted: "2021-01-05", status: "Active" },
-  { adm: "SJA-2048", first: "Moses", last: "Kiprono", gender: "M", dob: "2013-05-30", classId: "g7", stream: "West", guardian: "J. Kiprono", phone: "0712 000 104", address: "Nakuru", admitted: "2020-01-08", status: "Active" },
-  { adm: "SJA-2049", first: "Naomi", last: "Wairimu", gender: "F", dob: "2013-09-09", classId: "g7", stream: "West", guardian: "G. Wairimu", phone: "0712 000 105", address: "Nyeri", admitted: "2020-01-08", status: "Active" },
-  { adm: "SJA-2042", first: "Brian", last: "Mwangi", gender: "M", dob: "2010-02-11", classId: "g10", stream: "West", guardian: "P. Mwangi", phone: "0712 000 106", address: "Nairobi", admitted: "2017-01-09", status: "Active" },
-  { adm: "SJA-2044", first: "David", last: "Kamau", gender: "M", dob: "2008-06-18", classId: "g12", stream: "East", guardian: "M. Kamau", phone: "0712 000 107", address: "Thika", admitted: "2015-01-06", status: "Active" },
-  { adm: "SJA-1988", first: "Felix", last: "Kiptoo", gender: "M", dob: "2011-01-27", classId: "g10", stream: "East", guardian: "L. Kiptoo", phone: "0712 000 108", address: "Kericho", admitted: "2018-01-08", status: "Inactive" },
+  { adm: "SY-2041", first: "Amina", last: "Otieno", gender: "F", dob: "2013-03-14", classId: "g7", stream: "East", guardian: "J. Otieno", phone: "0712 000 101", address: "Kisumu", admitted: "2020-01-08", status: "Active" },
+  { adm: "SY-2046", first: "Kevin", last: "Barasa", gender: "M", dob: "2013-07-02", classId: "g7", stream: "East", guardian: "T. Barasa", phone: "0712 000 102", address: "Kakamega", admitted: "2020-01-08", status: "Active" },
+  { adm: "SY-2047", first: "Lilian", last: "Chebet", gender: "F", dob: "2013-11-21", classId: "g7", stream: "East", guardian: "E. Chebet", phone: "0712 000 103", address: "Eldoret", admitted: "2021-01-05", status: "Active" },
+  { adm: "SY-2048", first: "Moses", last: "Kiprono", gender: "M", dob: "2013-05-30", classId: "g7", stream: "West", guardian: "J. Kiprono", phone: "0712 000 104", address: "Nakuru", admitted: "2020-01-08", status: "Active" },
+  { adm: "SY-2049", first: "Naomi", last: "Wairimu", gender: "F", dob: "2013-09-09", classId: "g7", stream: "West", guardian: "G. Wairimu", phone: "0712 000 105", address: "Nyeri", admitted: "2020-01-08", status: "Active" },
+  { adm: "SY-2042", first: "Brian", last: "Mwangi", gender: "M", dob: "2010-02-11", classId: "g10", stream: "West", guardian: "P. Mwangi", phone: "0712 000 106", address: "Nairobi", admitted: "2017-01-09", status: "Active" },
+  { adm: "SY-2044", first: "David", last: "Kamau", gender: "M", dob: "2008-06-18", classId: "g12", stream: "East", guardian: "M. Kamau", phone: "0712 000 107", address: "Thika", admitted: "2015-01-06", status: "Active" },
+  { adm: "SY-1988", first: "Felix", last: "Kiptoo", gender: "M", dob: "2011-01-27", classId: "g10", stream: "East", guardian: "L. Kiptoo", phone: "0712 000 108", address: "Kericho", admitted: "2018-01-08", status: "Inactive" },
 ];
 
 export const learnerName = (l: Learner) => `${l.first} ${l.last}`;

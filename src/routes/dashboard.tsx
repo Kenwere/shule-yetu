@@ -9,10 +9,10 @@ import { dashboardStats, pendingApprovals, recentPayments, upcomingEvents } from
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
     meta: [
-      { title: "Dashboard — St John's Academy" },
-      { name: "description", content: "Staff dashboard for St John's Academy." },
-      { property: "og:title", content: "Dashboard — St John's Academy" },
-      { property: "og:description", content: "Staff dashboard for St John's Academy." },
+      { title: "Dashboard — Shule Yetu" },
+      { name: "description", content: "Staff dashboard for Shule Yetu." },
+      { property: "og:title", content: "Dashboard — Shule Yetu" },
+      { property: "og:description", content: "Staff dashboard for Shule Yetu." },
       { property: "og:type", content: "website" },
       { name: "robots", content: "noindex" },
     ],

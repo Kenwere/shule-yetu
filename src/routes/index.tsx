@@ -6,9 +6,9 @@ import campus from "@/assets/campus.jpg";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "St John's Academy — Discipline. Drive. Distinction." },
-      { name: "description", content: "St John's Academy, Nairobi: a co-educational day school building character through sport, scholarship and service since 1964." },
-      { property: "og:title", content: "St John's Academy — Nairobi" },
+      { title: "Shule Yetu — Discipline. Drive. Distinction." },
+      { name: "description", content: "Shule Yetu, Nairobi: a co-educational day school building character through sport, scholarship and service since 1964." },
+      { property: "og:title", content: "Shule Yetu — Nairobi" },
       { property: "og:description", content: "Character through sport, scholarship and service since 1964." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -50,7 +50,7 @@ function Index() {
               <Link to="/ask" className="border border-paper/30 px-6 py-3 font-bold uppercase tracking-wide transition-colors hover:border-gold hover:text-gold">Ask a question</Link>
             </div>
           </div>
-          <img src={crest} alt="St John's Academy crest" width={1024} height={1024} className="aspect-square w-full rotate-2 object-cover outline outline-1 -outline-offset-1 outline-paper/10" />
+          <img src={crest} alt="Shule Yetu crest" width={1024} height={1024} className="aspect-square w-full rotate-2 object-cover outline outline-1 -outline-offset-1 outline-paper/10" />
         </div>
       </section>
 
@@ -95,16 +95,16 @@ function Index() {
             <div className="eyebrow mb-4 text-ink-soft">03 / Contact</div>
             <h2 className="font-display text-4xl uppercase tracking-tight">Come and see us.</h2>
             <p className="mt-3 text-sm opacity-70">
-              Office open Mon–Fri, 7am–5pm.<br />+254 700 114 900 · admissions@stjohns.ac.ke<br />Nairobi, Kenya
+              Office open Mon–Fri, 7am–5pm.<br />+254 700 114 900 · admissions@shuleyetu.ac.ke<br />Nairobi, Kenya
             </p>
           </div>
-          <img src={campus} alt="St John's Academy campus" loading="lazy" width={1200} height={704} className="aspect-[16/9] w-full object-cover" />
+          <img src={campus} alt="Shule Yetu campus" loading="lazy" width={1200} height={704} className="aspect-[16/9] w-full object-cover" />
         </div>
       </section>
 
       <footer className="border-t border-paper/10 bg-ink py-8 text-paper/50">
         <div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-6 px-6 font-mono text-[11px] uppercase tracking-[0.15em]">
-          <span>© 2026 St John's Academy</span><span>Motto: Discipline · Drive · Distinction</span><span>Nairobi, Kenya</span>
+          <span>© 2026 Shule Yetu</span><span>Motto: Discipline · Drive · Distinction</span><span>Nairobi, Kenya</span>
         </div>
       </footer>
     </div>

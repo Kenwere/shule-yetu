@@ -74,14 +74,14 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border py-4">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip="St John's Academy">
+            <SidebarMenuButton size="lg" asChild tooltip="Shule Yetu">
               <Link to="/">
                 <div className="grid h-8 w-8 shrink-0 place-items-center bg-gold font-display text-base text-ink">
-                  SJA
+                  SY
                 </div>
                 <div className="flex min-w-0 flex-col leading-none group-data-[collapsible=icon]:hidden">
                   <span className="truncate font-display text-lg uppercase tracking-tight">
-                    St John's Academy
+                    Shule Yetu
                   </span>
                   <span className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60">
                     Est. 1964

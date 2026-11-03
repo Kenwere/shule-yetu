@@ -7,8 +7,10 @@ import { createRealtime, rawSql } from "@neon/realtime/server";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
+import { mountSchoolApi } from "./school-api";
+import { parseTriggerDelivery } from "@neon/functions/triggers";
 
-type Env = { Variables: { userId: string } };
+type Env = { Variables: { userId: string; userEmail: string; userName: string } };
 type SchoolNote = { id: string; user_id: string; text: string; created_at: string };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -31,7 +33,7 @@ const app = new Hono<Env>();
 
 app.use("*", cors({
   origin: "*",
-  allowMethods: ["GET", "POST", "OPTIONS"],
+  allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["Authorization", "Content-Type", "X-File-Name"],
 }));
 
@@ -45,23 +47,35 @@ app.get("/health", async (c) => {
   }
 });
 
-async function requireUser(request: Request): Promise<string | null> {
+async function requireUser(request: Request): Promise<{ id: string; email: string; name: string } | null> {
   const header = request.headers.get("Authorization");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, jwks, { issuer: authOrigin, audience: authOrigin });
-    return typeof payload.sub === "string" ? payload.sub : null;
+    return typeof payload.sub === "string" ? { id: payload.sub, email: typeof payload.email === "string" ? payload.email : "", name: typeof payload.name === "string" ? payload.name : "" } : null;
   } catch {
     return null;
   }
 }
 
 app.use("/api/*", async (c, next) => {
-  const userId = await requireUser(c.req.raw);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
-  c.set("userId", userId);
+  const user = await requireUser(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  c.set("userId", user.id);
+  c.set("userEmail", user.email);
+  c.set("userName", user.name);
   await next();
+});
+
+mountSchoolApi(app, pool);
+
+app.post("/internal/cleanup-announcements", async (c) => {
+  const parsed = await parseTriggerDelivery(c.req.raw);
+  if (!parsed.ok) return c.json({ error: parsed.error }, parsed.error === "invalid_body" ? 400 : 401);
+  if (parsed.invocation.type !== "schedule") return c.json({ error: "Schedule trigger required." }, 400);
+  const result = await pool.query("DELETE FROM school_announcements WHERE expires_at <= now()");
+  return c.json({ deleted: result.rowCount ?? 0 });
 });
 
 app.get("/api/notes", async (c) => {

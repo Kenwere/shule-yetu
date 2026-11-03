@@ -13,6 +13,7 @@ import {
   ClipboardList,
   FileText,
   Layers,
+  Megaphone,
 } from "lucide-react";
 
 import {
@@ -29,14 +30,16 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
-import { getMockUser, signOutMock, type MockUser } from "@/lib/mock-auth";
+import { neonApi } from "@/lib/neon-api";
 import { authClient } from "@/lib/auth-client";
 
 type PortalPath = NonNullable<LinkProps["to"]>;
+type PortalUser = { name: string; email: string; role: string; permissions: string[] };
 
 const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboard }[] = [
   { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
   { title: "Students", url: "/students", icon: GraduationCap },
+  { title: "Announcements", url: "/announcements", icon: Megaphone },
   { title: "Fees", url: "/fees", icon: Receipt },
   { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
   { title: "Teachers", url: "/teachers", icon: Users },
@@ -64,11 +67,13 @@ function initials(name: string) {
 export function AppSidebar() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (router) => router.location.pathname });
-  const [user, setUser] = useState<MockUser | null>(null);
+  const [user, setUser] = useState<PortalUser | null>(null);
 
-  useEffect(() => setUser(getMockUser()), []);
+  useEffect(() => { void neonApi("/api/me").then((r) => r.json()).then(setUser).catch(() => setUser(null)); }, []);
 
   const isActive = (url: string) => pathname === url;
+  const permissionFor: Record<string, string> = { "/dashboard":"view_students", "/students":"view_students", "/announcements":"view_announcements", "/fees":"view_fees", "/attendance":"view_attendance", "/teachers":"manage_staff", "/exams":"view_exams", "/report-cards":"view_exams", "/classes":"view_classes", "/settings":"manage_settings" };
+  const visibleItems = portalItems.filter((item) => user?.role === "Admin" || user?.permissions.includes(permissionFor[item.url as string]));
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -85,7 +90,7 @@ export function AppSidebar() {
                     Shule Yetu
                   </span>
                   <span className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60">
-                    Est. 1964
+                    School portal
                   </span>
                 </div>
               </Link>
@@ -99,7 +104,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Staff portal</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {portalItems.map((item) => (
+              {visibleItems.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                     <Link to={item.url}>
@@ -159,7 +164,6 @@ export function AppSidebar() {
               tooltip="Sign out"
               onClick={() => {
                 void authClient.signOut();
-                signOutMock();
                 navigate({ to: "/" });
               }}
             >

@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { AuthShell, Field, submitClass } from "@/components/AuthShell";
 import { authClient } from "@/lib/auth-client";
-import { signInMock } from "@/lib/mock-auth";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Staff Login — Shule Yetu" }, { name: "description", content: "Sign in to the Shule Yetu management portal." }] }),
@@ -26,7 +25,6 @@ function Login() {
         setError(result.error?.message ?? "Sign in failed.");
         return;
       }
-      signInMock({ name: result.data.user.name, email: result.data.user.email, role: "Staff" });
       await navigate({ to: "/dashboard" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Sign in failed.");

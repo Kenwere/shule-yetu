@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { getMockUser, type MockUser } from "@/lib/mock-auth";
+import { neonApi } from "@/lib/neon-api";
 import { authClient } from "@/lib/auth-client";
 
 export function SignInRequired() {
@@ -38,15 +38,15 @@ export function PortalShell({
   actions?: ReactNode;
   children: ReactNode;
 }) {
-  const [user, setUser] = useState<MockUser | null>(null);
+  const [user, setUser] = useState<{ name: string; email: string; role: string } | null>(null);
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    void authClient.getSession().then(({ data }) => {
-      if (!data?.user) setUser(null);
-      else setUser(getMockUser() ?? { name: data.user.name, email: data.user.email, role: "Staff" });
-      setChecked(true);
-    }).catch(() => { setUser(null); setChecked(true); });
+    void authClient.getSession().then(async ({ data }) => {
+      if (!data?.user) { setUser(null); return; }
+      const response = await neonApi("/api/me");
+      setUser(await response.json());
+    }).catch(() => setUser(null)).finally(() => setChecked(true));
   }, []);
 
   if (!checked) return null;

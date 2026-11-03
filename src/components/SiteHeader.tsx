@@ -13,13 +13,10 @@ export function SiteHeader() {
           <div className="grid h-9 w-9 place-items-center bg-ink font-display text-lg text-gold">SY</div>
           <div className="leading-none">
             <div className="font-display text-xl uppercase tracking-tight">Shule Yetu</div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-soft">Est. 1964 · Nairobi</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-soft">School portal</div>
           </div>
         </Link>
         <nav className="flex items-center gap-5 text-sm font-semibold md:gap-7">
-          <a href="/#vision" className="hidden hover:text-gold md:inline">Vision</a>
-          <a href="/#classes" className="hidden hover:text-gold md:inline">Classes</a>
-          <a href="/#contact" className="hidden hover:text-gold md:inline">Contact</a>
           <Link to="/ask" className="hover:text-gold">Ask us</Link>
           {signedIn && <Link to="/dashboard" className="hover:text-gold">Dashboard</Link>}
           <Link to="/login" className="hover:text-gold">Login</Link>

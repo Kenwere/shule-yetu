@@ -1,135 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
-import { Flash, Label, Panel, PrintButton, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
-import { classes, className, exams as seedExams, learnerName, learners, seedMarks, type Exam, type Mark } from "@/lib/mock-school";
-
-export const Route = createFileRoute("/exams")({
-  head: () => ({
-    meta: [
-      { title: "Exams & marks — Shule Yetu" },
-      { name: "description", content: "Create exams, approve marks and print ranked exam reports." },
-      { property: "og:title", content: "Exams & marks — Shule Yetu" },
-      { property: "og:description", content: "Create exams, approve marks and print ranked exam reports." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "robots", content: "noindex" },
-    ],
-  }),
-  component: ExamsPage,
-});
-
-const statusCls = { Pending: "bg-gold/20", Approved: "bg-collected-soft text-collected", Denied: "bg-owed-soft text-owed" };
-
+import { Panel, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
+import { neonApi } from "@/lib/neon-api";
+type ClassRow = { name: string; streams: string[]; subjects: string[] };
+type Exam = { id: string; name: string; className: string; stream: string; term: string; startsOn: string; endsOn: string; pending: number };
+type Mark = { id: string; student: string; adm: string; subject: string; score: number; status: "Pending" | "Approved" | "Denied" };
+export const Route = createFileRoute("/exams")({ head: () => ({ meta: [{ title: "Exams and marks — Shule Yetu" }, { name: "robots", content: "noindex" }] }), component: ExamsPage });
 function ExamsPage() {
-  const [exams, setExams] = useState<Exam[]>(seedExams);
-  const [marks, setMarks] = useState<Mark[]>(seedMarks);
-  const [examId, setExamId] = useState("e1");
-  const [flash, setFlash] = useState<string | null>(null);
-  const [ne, setNe] = useState({ name: "", classId: "g7", stream: "East", term: "Term 3", start: "", end: "" });
-  const exam = exams.find((e) => e.id === examId)!;
-  const cls = classes.find((c) => c.id === exam.classId)!;
-  const em = marks.filter((m) => m.examId === examId);
-
-  const update = (pred: (m: Mark) => boolean, patch: Partial<Mark>) => setMarks((ms) => ms.map((m) => (pred(m) ? { ...m, ...patch } : m)));
-
-  const ranked = useMemo(() => {
-    const roster = learners.filter((l) => l.classId === exam.classId && l.stream === exam.stream && l.status === "Active");
-    return roster
-      .map((l) => {
-        const scores = Object.fromEntries(cls.subjects.map((s) => [s, em.find((m) => m.adm === l.adm && m.subject === s && m.status === "Approved")?.score]));
-        const total = Object.values(scores).reduce<number>((a, b) => a + (b ?? 0), 0);
-        return { l, scores, total, mean: total / cls.subjects.length };
-      })
-      .sort((a, b) => b.total - a.total);
-  }, [em, exam, cls]);
-
-  return (
-    <PortalShell eyebrow="Academics" title="Exams & marks">
-      <Flash message={flash} />
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="Exams" className="lg:col-span-2">
-          <table className="w-full text-sm">
-            <thead><tr>{["Exam", "Class", "Term", "Dates", "Pending", ""].map((h) => <th key={h} className={thCls}>{h}</th>)}</tr></thead>
-            <tbody>
-              {exams.map((e) => (
-                <tr key={e.id} className={e.id === examId ? "bg-gold/10" : ""}>
-                  <td className={`${tdCls} font-semibold`}>{e.name}</td><td className={tdCls}>{className(e.classId)} {e.stream}</td><td className={tdCls}>{e.term} {e.year}</td><td className={tdCls}>{e.start} → {e.end}</td>
-                  <td className={tdCls}>{marks.filter((m) => m.examId === e.id && m.status === "Pending").length}</td>
-                  <td className={tdCls}><button className={btn("ghost")} onClick={() => setExamId(e.id)}>Open</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-        <Panel title="Create exam">
-          <form className="space-y-2" onSubmit={(e) => {
-            e.preventDefault();
-            if (!ne.name || !ne.start || !ne.end || ne.end < ne.start) return setFlash("Give a name and valid start/end dates.");
-            const id = `e${Date.now()}`;
-            setExams([...exams, { id, ...ne, year: 2026 }]);
-            const c = classes.find((x) => x.id === ne.classId)!;
-            const roster = learners.filter((l) => l.classId === ne.classId && l.stream === ne.stream && l.status === "Active");
-            setMarks([...marks, ...roster.flatMap((l) => c.subjects.map((s) => ({ examId: id, adm: l.adm, subject: s, score: 0, status: "Pending" as const, locked: false, teacher: "—" })))]);
-            setExamId(id); setFlash(`${ne.name} created.`);
-          }}>
-            <Label text="Name"><input className={inputCls} value={ne.name} onChange={(e) => setNe({ ...ne, name: e.target.value })} /></Label>
-            <div className="grid grid-cols-2 gap-2">
-              <Label text="Class"><select className={inputCls} value={ne.classId} onChange={(e) => { const c = classes.find((x) => x.id === e.target.value)!; setNe({ ...ne, classId: c.id, stream: c.streams[0] ?? "" }); }}>{classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Label>
-              <Label text="Stream"><select className={inputCls} value={ne.stream} onChange={(e) => setNe({ ...ne, stream: e.target.value })}>{classes.find((c) => c.id === ne.classId)!.streams.map((s) => <option key={s}>{s}</option>)}</select></Label>
-              <Label text="Start"><input type="date" className={inputCls} value={ne.start} onChange={(e) => setNe({ ...ne, start: e.target.value })} /></Label>
-              <Label text="End"><input type="date" className={inputCls} value={ne.end} onChange={(e) => setNe({ ...ne, end: e.target.value })} /></Label>
-            </div>
-            <Label text="Term"><select className={inputCls} value={ne.term} onChange={(e) => setNe({ ...ne, term: e.target.value })}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></Label>
-            <button className={btn()}>Create</button>
-          </form>
-        </Panel>
-      </div>
-
-      <Panel title={`Marks · ${exam.name} · ${cls.name} ${exam.stream}`} className="mt-6" action={
-        <button className={btn("good")} onClick={() => { update((m) => m.examId === examId && m.status === "Pending", { status: "Approved", locked: true }); setFlash("All pending marks approved and locked."); }}>Approve all</button>
-      }>
-        <div className="max-h-96 overflow-auto">
-          <table className="w-full text-sm">
-            <thead><tr>{["Learner", "Subject", "Score", "Teacher", "Status", ""].map((h) => <th key={h} className={thCls}>{h}</th>)}</tr></thead>
-            <tbody>
-              {em.map((m) => {
-                const key = (x: Mark) => x.examId === m.examId && x.adm === m.adm && x.subject === m.subject;
-                const l = learners.find((x) => x.adm === m.adm)!;
-                return (
-                  <tr key={m.adm + m.subject}>
-                    <td className={tdCls}>{learnerName(l)}</td><td className={tdCls}>{m.subject}</td>
-                    <td className={tdCls}><input type="number" min={0} max={100} disabled={m.locked} value={m.score} className={`${inputCls} w-20 py-1`} onChange={(e) => update(key, { score: Math.max(0, Math.min(100, Number(e.target.value))), status: "Pending" })} /></td>
-                    <td className={tdCls}>{m.teacher}</td>
-                    <td className={tdCls}><span className={`px-2 py-0.5 text-xs ${statusCls[m.status]}`}>{m.status}{m.locked ? " · locked" : ""}</span></td>
-                    <td className={`${tdCls} whitespace-nowrap`}>
-                      <button className={btn("good")} onClick={() => update(key, { status: "Approved", locked: true })}>✓</button>{" "}
-                      <button className={btn("bad")} onClick={() => update(key, { status: "Denied", locked: false })}>✕</button>{" "}
-                      <button className={btn("ghost")} onClick={() => update(key, { locked: !m.locked })}>{m.locked ? "Unlock" : "Lock"}</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      <Panel title={`Ranked report · ${exam.name}`} className="mt-6" action={<PrintButton label="Print report" />}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr><th className={thCls}>Pos</th><th className={thCls}>Learner</th>{cls.subjects.map((s) => <th key={s} className={thCls}>{s.slice(0, 4)}</th>)}<th className={thCls}>Total</th><th className={thCls}>Mean</th></tr></thead>
-            <tbody>
-              {ranked.map((r, i) => (
-                <tr key={r.l.adm}><td className={`${tdCls} font-display text-lg`}>{i + 1}</td><td className={`${tdCls} font-semibold`}>{learnerName(r.l)}</td>
-                  {cls.subjects.map((s) => <td key={s} className={tdCls}>{r.scores[s] ?? "—"}</td>)}
-                  <td className={`${tdCls} font-semibold`}>{r.total}</td><td className={tdCls}>{r.mean.toFixed(1)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-xs text-ink-soft">Only approved marks count towards the ranking.</p>
-      </Panel>
-    </PortalShell>
-  );
+  const [classes, setClasses] = useState<ClassRow[]>([]); const [exams, setExams] = useState<Exam[]>([]); const [marks, setMarks] = useState<Mark[]>([]); const [examId, setExamId] = useState(""); const [error, setError] = useState("");
+  const [draft, setDraft] = useState({ name: "", className: "", stream: "", term: "", startsOn: "", endsOn: "" });
+  async function loadExams() { try { const [c, e] = await Promise.all([neonApi("/api/classes"), neonApi("/api/exams")]); const cs = await c.json(); const es = await e.json(); setClasses(cs); setExams(es); setExamId((id) => es.some((x: Exam) => x.id === id) ? id : es[0]?.id ?? ""); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Could not load exams."); } }
+  useEffect(() => { void loadExams(); }, []);
+  useEffect(() => { if (!examId) { setMarks([]); return; } void neonApi(`/api/exams/${examId}/marks`).then(r => r.json()).then(setMarks).catch(e => setError(e.message)); }, [examId]);
+  async function create(e: FormEvent) { e.preventDefault(); setError(""); try { await neonApi("/api/exams", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) }); setDraft({ ...draft, name: "" }); await loadExams(); } catch (e) { setError(e instanceof Error ? e.message : "Could not create exam."); } }
+  async function update(mark: Mark, patch: Partial<Mark>) { try { const r = await neonApi(`/api/marks/${mark.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }); const next = await r.json(); setMarks(rows => rows.map(x => x.id === mark.id ? next : x)); } catch (e) { setError(e instanceof Error ? e.message : "Could not save mark."); } }
+  const selected = exams.find(x => x.id === examId);
+  return <PortalShell eyebrow="Academics" title="Exams and marks">{error && <p role="alert" className="mb-4 text-owed">{error}</p>}<div className="grid gap-6 lg:grid-cols-3"><Panel title="School exams" className="lg:col-span-2"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr>{["Exam", "Class", "Term", "Dates", "Pending", ""].map(x => <th key={x} className={thCls}>{x}</th>)}</tr></thead><tbody>{exams.map(x => <tr key={x.id}><td className={tdCls}>{x.name}</td><td className={tdCls}>{x.className} {x.stream}</td><td className={tdCls}>{x.term}</td><td className={tdCls}>{x.startsOn} – {x.endsOn}</td><td className={tdCls}>{x.pending}</td><td className={tdCls}><button className={btn("ghost")} onClick={() => setExamId(x.id)}>Open</button></td></tr>)}{!exams.length && <tr><td colSpan={6} className="px-4 py-8 text-center text-ink-soft">No exams have been created.</td></tr>}</tbody></table></div></Panel><Panel title="Create exam"><form onSubmit={create} className="space-y-3"><label className="block text-sm">Exam name<input required className={inputCls} value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })}/></label><label className="block text-sm">Class<select required className={inputCls} value={draft.className} onChange={e => { const c = classes.find(x => x.name === e.target.value); setDraft({ ...draft, className: e.target.value, stream: c?.streams?.[0] || "" }); }}><option value="">Select class</option>{classes.map(c => <option key={c.name}>{c.name}</option>)}</select></label><label className="block text-sm">Stream<select className={inputCls} value={draft.stream} onChange={e => setDraft({ ...draft, stream: e.target.value })}>{(classes.find(c => c.name === draft.className)?.streams || []).map(s => <option key={s}>{s}</option>)}</select></label><label className="block text-sm">Term<input required className={inputCls} value={draft.term} onChange={e => setDraft({ ...draft, term: e.target.value })} placeholder="Term 1"/></label><div className="grid grid-cols-2 gap-2"><label className="block text-sm">Start<input required type="date" className={inputCls} value={draft.startsOn} onChange={e => setDraft({ ...draft, startsOn: e.target.value })}/></label><label className="block text-sm">End<input required type="date" className={inputCls} value={draft.endsOn} onChange={e => setDraft({ ...draft, endsOn: e.target.value })}/></label></div><button className={btn()}>Create exam</button></form></Panel></div>{selected && <Panel title={`Marks - ${selected.name}`} className="mt-6"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr>{["Student", "Admission", "Subject", "Score", "Status", "Actions"].map(x => <th key={x} className={thCls}>{x}</th>)}</tr></thead><tbody>{marks.map(m => <tr key={m.id}><td className={tdCls}>{m.student}</td><td className={tdCls}>{m.adm}</td><td className={tdCls}>{m.subject}</td><td className={tdCls}><input type="number" min="0" max="100" className="w-20 border border-input px-2 py-1" value={m.score} onChange={e => void update(m, { score: Number(e.target.value), status: "Pending" })}/></td><td className={tdCls}>{m.status}</td><td className={tdCls}><button className={btn("good")} onClick={() => void update(m, { status: "Approved" })}>Approve</button> <button className={btn("bad")} onClick={() => void update(m, { status: "Denied" })}>Deny</button></td></tr>)}{!marks.length && <tr><td colSpan={6} className="px-4 py-8 text-center text-ink-soft">No students or class subjects are available for this exam.</td></tr>}</tbody></table></div></Panel>}</PortalShell>;
 }

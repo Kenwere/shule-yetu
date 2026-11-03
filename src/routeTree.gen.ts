@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AnnouncementsRouteImport } from './routes/announcements'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AttendanceRouteImport } from './routes/attendance'
 import { Route as ClassesRouteImport } from './routes/classes'
@@ -23,10 +24,16 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StudentsRouteImport } from './routes/students'
 import { Route as TeachersRouteImport } from './routes/teachers'
 import { Route as ApiAskRouteImport } from './routes/api/ask'
+import { Route as StudentsStudentIdRouteImport } from './routes/students.$studentId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnnouncementsRoute = AnnouncementsRouteImport.update({
+  id: '/announcements',
+  path: '/announcements',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AskRoute = AskRouteImport.update({
@@ -94,9 +101,15 @@ const ApiAskRoute = ApiAskRouteImport.update({
   path: '/api/ask',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StudentsStudentIdRoute = StudentsStudentIdRouteImport.update({
+  id: '/$studentId',
+  path: '/$studentId',
+  getParentRoute: () => StudentsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/announcements': typeof AnnouncementsRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
   '/classes': typeof ClassesRoute
@@ -107,12 +120,14 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/settings': typeof SettingsRoute
-  '/students': typeof StudentsRoute
+  '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
+  '/students/$studentId': typeof StudentsStudentIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/announcements': typeof AnnouncementsRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
   '/classes': typeof ClassesRoute
@@ -123,13 +138,15 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/settings': typeof SettingsRoute
-  '/students': typeof StudentsRoute
+  '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
+  '/students/$studentId': typeof StudentsStudentIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/announcements': typeof AnnouncementsRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
   '/classes': typeof ClassesRoute
@@ -140,14 +157,16 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/settings': typeof SettingsRoute
-  '/students': typeof StudentsRoute
+  '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
+  '/students/$studentId': typeof StudentsStudentIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/announcements'
     | '/ask'
     | '/attendance'
     | '/classes'
@@ -161,9 +180,11 @@ export interface FileRouteTypes {
     | '/students'
     | '/teachers'
     | '/api/ask'
+    | '/students/$studentId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/announcements'
     | '/ask'
     | '/attendance'
     | '/classes'
@@ -177,9 +198,11 @@ export interface FileRouteTypes {
     | '/students'
     | '/teachers'
     | '/api/ask'
+    | '/students/$studentId'
   id:
     | '__root__'
     | '/'
+    | '/announcements'
     | '/ask'
     | '/attendance'
     | '/classes'
@@ -193,10 +216,12 @@ export interface FileRouteTypes {
     | '/students'
     | '/teachers'
     | '/api/ask'
+    | '/students/$studentId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AnnouncementsRoute: typeof AnnouncementsRoute
   AskRoute: typeof AskRoute
   AttendanceRoute: typeof AttendanceRoute
   ClassesRoute: typeof ClassesRoute
@@ -207,7 +232,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   ReportCardsRoute: typeof ReportCardsRoute
   SettingsRoute: typeof SettingsRoute
-  StudentsRoute: typeof StudentsRoute
+  StudentsRoute: typeof StudentsRouteWithChildren
   TeachersRoute: typeof TeachersRoute
   ApiAskRoute: typeof ApiAskRoute
 }
@@ -219,6 +244,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/announcements': {
+      id: '/announcements'
+      path: '/announcements'
+      fullPath: '/announcements'
+      preLoaderRoute: typeof AnnouncementsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ask': {
@@ -312,11 +344,31 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAskRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/students/$studentId': {
+      id: '/students/$studentId'
+      path: '/$studentId'
+      fullPath: '/students/$studentId'
+      preLoaderRoute: typeof StudentsStudentIdRouteImport
+      parentRoute: typeof StudentsRoute
+    }
   }
 }
 
+interface StudentsRouteChildren {
+  StudentsStudentIdRoute: typeof StudentsStudentIdRoute
+}
+
+const StudentsRouteChildren: StudentsRouteChildren = {
+  StudentsStudentIdRoute: StudentsStudentIdRoute,
+}
+
+const StudentsRouteWithChildren = StudentsRoute._addFileChildren(
+  StudentsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AnnouncementsRoute: AnnouncementsRoute,
   AskRoute: AskRoute,
   AttendanceRoute: AttendanceRoute,
   ClassesRoute: ClassesRoute,
@@ -327,7 +379,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   ReportCardsRoute: ReportCardsRoute,
   SettingsRoute: SettingsRoute,
-  StudentsRoute: StudentsRoute,
+  StudentsRoute: StudentsRouteWithChildren,
   TeachersRoute: TeachersRoute,
   ApiAskRoute: ApiAskRoute,
 }

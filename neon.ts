@@ -21,6 +21,9 @@ export default defineConfig({
       },
     },
   },
+  triggers: {
+    expiredAnnouncementsCleanup: { type: "schedule", function: "hello", cron: "0 * * * *", functionPath: "/internal/cleanup-announcements" },
+  },
   buckets: {
     assets: { access: "private" },
   },

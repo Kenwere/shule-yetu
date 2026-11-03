@@ -1,74 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { useEffect, useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Label, Panel, PrintButton, inputCls, tdCls, thCls } from "@/components/portal-ui";
-import { classes, className, learnerName, learners, seedMarks, termTotals } from "@/lib/mock-school";
+import { neonApi } from "@/lib/neon-api";
 
+type Student = { id: string; adm: string; first: string; last: string; class: string; stream: string };
+type Mark = { exam: string; term: string; subject: string; score: number };
 export const Route = createFileRoute("/report-cards")({
-  head: () => ({
-    meta: [
-      { title: "Report cards — Shule Yetu" },
-      { name: "description", content: "Printable learner report cards with term performance charts." },
-      { property: "og:title", content: "Report cards — Shule Yetu" },
-      { property: "og:description", content: "Printable learner report cards with term performance charts." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "robots", content: "noindex" },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Report cards — Shule Yetu" }, { name: "robots", content: "noindex" }] }),
   component: ReportCards,
 });
-
-const marks = seedMarks();
 const grade = (s: number) => (s >= 80 ? "A" : s >= 65 ? "B" : s >= 50 ? "C" : s >= 40 ? "D" : "E");
-
 function ReportCards() {
-  const active = learners.filter((l) => l.status === "Active");
-  const [adm, setAdm] = useState(active[0]?.adm ?? "");
-  const l = learners.find((x) => x.adm === adm)!;
-  const cls = classes.find((c) => c.id === l.classId)!;
-  const mine = marks.filter((m) => m.adm === adm && m.status === "Approved");
-
-  return (
-    <PortalShell eyebrow="Academics" title="Report cards" actions={<PrintButton label="Print card" />}>
-      <div className="mb-4 max-w-xs print:hidden">
-        <Label text="Learner"><select className={inputCls} value={adm} onChange={(e) => setAdm(e.target.value)}>{active.map((x) => <option key={x.adm} value={x.adm}>{learnerName(x)} · {x.adm}</option>)}</select></Label>
-      </div>
-      <Panel>
-        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-ink/10 pb-4">
-          <div><div className="font-display text-3xl uppercase">Shule Yetu</div><div className="eyebrow text-ink-soft">Learner report card · 2026</div></div>
-          <div className="text-right text-sm"><b>{learnerName(l)}</b><br />{l.adm} · {className(l.classId)} {l.stream}</div>
-        </div>
-        <div className="mt-4 grid gap-6 lg:grid-cols-2">
-          <table className="w-full text-sm">
-            <thead><tr>{["Subject", "Score", "Grade"].map((h) => <th key={h} className={thCls}>{h}</th>)}</tr></thead>
-            <tbody>
-              {cls.subjects.map((s) => {
-                const sc = mine.filter((m) => m.subject === s).at(-1)?.score;
-                return <tr key={s}><td className={tdCls}>{s}</td><td className={tdCls}>{sc ?? "—"}</td><td className={`${tdCls} font-semibold`}>{sc != null ? grade(sc) : "—"}</td></tr>;
-              })}
-            </tbody>
-          </table>
-          <div>
-            <div className="eyebrow mb-2 text-ink-soft">Total marks by term</div>
-            <div className="h-56">
-              <ResponsiveContainer>
-                <BarChart data={termTotals[adm] ?? []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="term" fontSize={12} />
-                  <YAxis fontSize={12} />
-                  <Bar dataKey="total" fill="var(--color-ink)" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-        <div className="mt-6 grid gap-4 text-sm sm:grid-cols-2">
-          <div className="border border-ink/10 p-3"><div className="eyebrow text-[10px] text-ink-soft">Class teacher's remarks</div><div className="mt-6 border-b border-ink/30" /></div>
-          <div className="border border-ink/10 p-3"><div className="eyebrow text-[10px] text-ink-soft">Principal's remarks</div><div className="mt-6 border-b border-ink/30" /></div>
-        </div>
-      </Panel>
-    </PortalShell>
-  );
+  const [students, setStudents] = useState<Student[]>([]);
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const [studentId, setStudentId] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => { void neonApi("/api/students").then((r) => r.json()).then((rows: Student[]) => { setStudents(rows); setStudentId(rows[0]?.id ?? ""); }).catch((e) => setError(e.message)); }, []);
+  useEffect(() => { if (!studentId) { setMarks([]); return; } void neonApi(`/api/students/${studentId}/report-card`).then((r) => r.json()).then((rows: Mark[]) => setMarks(rows)).catch((e) => setError(e.message)); }, [studentId]);
+  const student = students.find((s) => s.id === studentId);
+  return <PortalShell eyebrow="Academics" title="Report cards" actions={<PrintButton label="Print card" />}>
+    {error && <p role="alert" className="mb-4 text-owed">{error}</p>}
+    {!students.length ? <Panel title="No student records"><p>Add students and approved exam marks to create report cards.</p></Panel> : <>
+      <div className="mb-4 max-w-xs print:hidden"><Label text="Student"><select className={inputCls} value={studentId} onChange={(e) => setStudentId(e.target.value)}>{students.map((s) => <option key={s.id} value={s.id}>{s.first} {s.last} · {s.adm}</option>)}</select></Label></div>
+      {student && <Panel><div className="flex items-end justify-between border-b border-ink/10 pb-4"><div><div className="font-display text-3xl uppercase">Report card</div><div className="eyebrow text-ink-soft">Approved marks</div></div><div className="text-right text-sm"><b>{student.first} {student.last}</b><br/>{student.adm} · {student.class} {student.stream}</div></div>
+        {!marks.length ? <p className="py-8 text-sm text-ink-soft">No approved marks have been recorded for this student.</p> : <table className="mt-4 w-full text-sm"><thead><tr>{["Exam", "Term", "Subject", "Score", "Grade"].map((h) => <th key={h} className={thCls}>{h}</th>)}</tr></thead><tbody>{marks.map((m, i) => <tr key={`${m.exam}-${m.subject}-${i}`}><td className={tdCls}>{m.exam}</td><td className={tdCls}>{m.term}</td><td className={tdCls}>{m.subject}</td><td className={tdCls}>{m.score}</td><td className={tdCls}>{grade(m.score)}</td></tr>)}</tbody></table>}
+      </Panel>}
+    </>}
+  </PortalShell>;
 }
+

@@ -30,6 +30,7 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { getMockUser, signOutMock, type MockUser } from "@/lib/mock-auth";
+import { authClient } from "@/lib/auth-client";
 
 type PortalPath = NonNullable<LinkProps["to"]>;
 
@@ -157,6 +158,7 @@ export function AppSidebar() {
             <SidebarMenuButton
               tooltip="Sign out"
               onClick={() => {
+                void authClient.signOut();
                 signOutMock();
                 navigate({ to: "/" });
               }}

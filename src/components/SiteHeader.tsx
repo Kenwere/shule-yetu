@@ -1,10 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { getMockUser } from "@/lib/mock-auth";
+import { authClient } from "@/lib/auth-client";
 
 export function SiteHeader() {
   const [signedIn, setSignedIn] = useState(false);
-  useEffect(() => setSignedIn(getMockUser() !== null), []);
+  useEffect(() => { void authClient.getSession().then(({ data }) => setSignedIn(!!data?.user)).catch(() => setSignedIn(false)); }, []);
 
   return (
     <header className="sticky top-0 z-50 border-b border-ink/10 bg-paper/90 backdrop-blur">

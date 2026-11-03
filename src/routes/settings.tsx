@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { schoolInfo } from "@/lib/school-info";
+import { NeonBackendTools } from "@/components/NeonBackendTools";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -151,6 +152,7 @@ function SettingsPage() {
           </span>
         </div>
       </form>
+      <div className="mt-8"><NeonBackendTools /></div>
     </PortalShell>
   );
 }

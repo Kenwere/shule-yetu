@@ -20,7 +20,6 @@ export const pendingApprovals = [
 ];
 
 export const upcomingEvents = [
-  { title: "Term 2 mid-term break", date: "23–27 Oct" },
   { title: "Inter-house athletics", date: "6 Nov" },
   { title: "Parents' day — Junior School", date: "13 Nov" },
   { title: "Swimming gala", date: "20 Nov" },

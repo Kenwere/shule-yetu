@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { getMockUser, type MockUser } from "@/lib/mock-auth";
+import { authClient } from "@/lib/auth-client";
 
 export function SignInRequired() {
   return (
@@ -41,8 +42,11 @@ export function PortalShell({
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    setUser(getMockUser());
-    setChecked(true);
+    void authClient.getSession().then(({ data }) => {
+      if (!data?.user) setUser(null);
+      else setUser(getMockUser() ?? { name: data.user.name, email: data.user.email, role: "Staff" });
+      setChecked(true);
+    }).catch(() => { setUser(null); setChecked(true); });
   }, []);
 
   if (!checked) return null;

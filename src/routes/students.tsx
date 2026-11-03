@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Flash, Label, Panel, btn, inputCls, thCls } from "@/components/portal-ui";
@@ -9,13 +9,14 @@ const empty: Student = { id: "", adm: "", first: "", last: "", gender: "", dob: 
 const td = "border-t border-ink/10 px-4 py-3";
 export const Route = createFileRoute("/students")({ head: () => ({ meta: [{ title: "Students - Shule Yetu" }, { name: "description", content: "School student register and individual profiles." }, { name: "robots", content: "noindex" }] }), component: StudentsPage });
 function StudentsPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate(); const isProfileRoute = useRouterState({ select: state => state.location.pathname.startsWith("/students/") });
   const [list, setList] = useState<Student[]>([]); const [classes, setClasses] = useState<SchoolClass[]>([]); const [q, setQ] = useState(""); const [filter, setFilter] = useState("All"); const [form, setForm] = useState<Student | null>(null); const [flash, setFlash] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [photoFile, setPhotoFile] = useState<File | null>(null); const [photoPreview, setPhotoPreview] = useState("");
   async function load() { try { const [studentsResponse, classesResponse] = await Promise.all([neonApi("/api/students"), neonApi("/api/classes")]); setList(await studentsResponse.json()); setClasses(await classesResponse.json()); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Could not load students and classes."); } }
   useEffect(() => { void load(); }, []);
   useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview); }, [photoPreview]);
   const rows = useMemo(() => list.filter(s => (filter === "All" || s.status === filter) && `${s.first} ${s.last} ${s.adm} ${s.class}`.toLowerCase().includes(q.toLowerCase())), [list, filter, q]);
   const selectedClass = classes.find(c => c.name === form?.class);
+  if (isProfileRoute) return <Outlet />;
   async function save(e: FormEvent) { e.preventDefault(); if (!form) return; setBusy(true); setFlash(""); setError(""); try { const response = await neonApi("/api/students", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }); const saved = await response.json(); if (photoFile) await neonApi(`/api/students/${saved.id}/photo`, { method: "POST", headers: { "Content-Type": photoFile.type }, body: photoFile }); setFlash(`${form.first} ${form.last} saved.`); setForm(null); setPhotoFile(null); setPhotoPreview(""); await load(); } catch (err) { setError(err instanceof Error ? err.message : "Could not save student or upload photo."); } finally { setBusy(false); } }
   async function remove(student: Student) { if (!window.confirm(`Delete ${student.first} ${student.last} and their fee history?`)) return; try { await neonApi(`/api/students/${student.id}`, { method: "DELETE" }); setFlash(`${student.first} ${student.last} removed.`); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Could not remove student."); } }
   return <PortalShell eyebrow="Register" title="Students" actions={<button className={btn()} onClick={() => { setPhotoFile(null); setPhotoPreview(""); setForm({ ...empty }); }}>Add student</button>}><Flash message={flash || null} />{error && <p role="alert" className="mb-4 text-sm text-owed">{error}</p>}

@@ -20,6 +20,7 @@ import { Route as FeesRouteImport } from './routes/fees'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ReportCardsRouteImport } from './routes/report-cards'
+import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StudentsRouteImport } from './routes/students'
 import { Route as TeachersRouteImport } from './routes/teachers'
@@ -81,6 +82,11 @@ const ReportCardsRoute = ReportCardsRouteImport.update({
   path: '/report-cards',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -119,6 +125,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
@@ -137,6 +144,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
@@ -156,6 +164,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
@@ -176,6 +185,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/report-cards'
+    | '/reports'
     | '/settings'
     | '/students'
     | '/teachers'
@@ -194,6 +204,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/report-cards'
+    | '/reports'
     | '/settings'
     | '/students'
     | '/teachers'
@@ -212,6 +223,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/report-cards'
+    | '/reports'
     | '/settings'
     | '/students'
     | '/teachers'
@@ -231,6 +243,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   ReportCardsRoute: typeof ReportCardsRoute
+  ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
   StudentsRoute: typeof StudentsRouteWithChildren
   TeachersRoute: typeof TeachersRoute
@@ -316,6 +329,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportCardsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -378,6 +398,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   ReportCardsRoute: ReportCardsRoute,
+  ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
   StudentsRoute: StudentsRouteWithChildren,
   TeachersRoute: TeachersRoute,

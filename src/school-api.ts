@@ -1,11 +1,15 @@
 import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { Pool } from "pg";
 
 type ApiEnv = { Variables: { userId: string; userEmail: string; userName: string } };
 type Context = { schoolId: string; role: string; permissions: string[]; name: string };
 type Permission = "view_students" | "edit_students" | "view_fees" | "edit_fees" | "manage_staff" | "view_classes" | "edit_classes" | "manage_settings" | "view_announcements" | "manage_announcements" | "view_attendance" | "edit_attendance" | "view_exams" | "edit_exams";
 const allPermissions: Permission[] = ["view_students","edit_students","view_fees","edit_fees","manage_staff","view_classes","edit_classes","manage_settings","view_announcements","manage_announcements","view_attendance","edit_attendance","view_exams","edit_exams"];
+const s3 = new S3Client({ forcePathStyle: true });
+const imageBucket = "assets";
 const rolePermissions: Record<string, Permission[]> = {
   Admin: allPermissions,
   Teacher: ["view_students","view_classes","view_announcements","view_attendance","edit_attendance","view_exams","edit_exams"],
@@ -38,16 +42,18 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
   app.get("/api/me", async (c) => {
     const context = await contextFor(c);
     if (!context) return c.json({ error: "This account is not attached to a school." }, 403);
-    const profile = await pool.query("SELECT school_name, school_type, contact_email, phone, address, website, motto FROM school_profiles WHERE user_id = $1", [context.schoolId]);
-    return c.json({ userId: c.get("userId"), email: c.get("userEmail"), name: context.name, role: context.role, permissions: context.permissions, school: profile.rows[0] ?? null });
+    const profile = await pool.query(`SELECT school_name, school_type, contact_email, phone, address, website, motto, vision, logo_key, academic_year AS "academicYear", active_term AS "activeTerm", term1_start_date AS "term1StartDate", term1_end_date AS "term1EndDate", term2_start_date AS "term2StartDate", term2_end_date AS "term2EndDate", term3_start_date AS "term3StartDate", term3_end_date AS "term3EndDate" FROM school_profiles WHERE user_id = $1`, [context.schoolId]);
+    const school = profile.rows[0] ?? null; if (school?.logo_key) { school.logoUrl = await getSignedUrl(s3,new GetObjectCommand({Bucket:imageBucket,Key:school.logo_key}),{expiresIn:3600}); delete school.logo_key; } return c.json({ userId: c.get("userId"), email: c.get("userEmail"), name: context.name, role: context.role, permissions: context.permissions, school });
   });
 
   app.get("/api/school-profile", async (c) => {
     const context = await guard(c, "manage_settings");
     if (!context) return c.json({ error: "Not allowed to view school settings." }, 403);
-    const result = await pool.query("SELECT school_name, school_type, contact_email, phone, address, website, motto FROM school_profiles WHERE user_id = $1", [context.schoolId]);
-    return c.json(result.rows[0] ?? null);
+    const result = await pool.query(`SELECT school_name, school_type, contact_email, phone, address, website, motto, vision, logo_key, academic_year AS "academicYear", active_term AS "activeTerm", term1_start_date AS "term1StartDate", term1_end_date AS "term1EndDate", term2_start_date AS "term2StartDate", term2_end_date AS "term2EndDate", term3_start_date AS "term3StartDate", term3_end_date AS "term3EndDate" FROM school_profiles WHERE user_id = $1`, [context.schoolId]);
+    const profile = result.rows[0] ?? null; if (profile?.logo_key) { profile.logoUrl = await getSignedUrl(s3,new GetObjectCommand({Bucket:imageBucket,Key:profile.logo_key}),{expiresIn:3600}); delete profile.logo_key; }
+    return c.json(profile);
   });
+  app.post("/api/school-profile/logo",async(c)=>{const context=await guard(c,"manage_settings");if(!context)return c.json({error:"Not allowed to upload a school logo."},403);const type=String(c.req.header("Content-Type")||"").split(";")[0].toLowerCase();if(!["image/jpeg","image/png","image/webp"].includes(type))return c.json({error:"Use a JPG, PNG, or WEBP image."},415);const bytes=Buffer.from(await c.req.arrayBuffer());if(!bytes.length||bytes.length>5*1024*1024)return c.json({error:"Logo must be smaller than 5 MB."},413);const jpeg=bytes[0]===255&&bytes[1]===216&&bytes[2]===255,png=bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),webp=bytes.toString("ascii",0,4)==="RIFF"&&bytes.toString("ascii",8,12)==="WEBP";if(!(type==="image/jpeg"&&jpeg)&&!(type==="image/png"&&png)&&!(type==="image/webp"&&webp))return c.json({error:"Image content does not match the selected file type."},415);const old=await pool.query("SELECT logo_key FROM school_profiles WHERE user_id=$1",[context.schoolId]);if(!old.rowCount)return c.json({error:"School profile not found."},404);const ext=type==="image/jpeg"?"jpg":type.slice(6),key="schools/"+context.schoolId+"/logo/"+randomUUID()+"."+ext;await s3.send(new PutObjectCommand({Bucket:imageBucket,Key:key,Body:bytes,ContentType:type}));try{await pool.query("UPDATE school_profiles SET logo_key=$2,updated_at=now() WHERE user_id=$1",[context.schoolId,key])}catch(error){await s3.send(new DeleteObjectCommand({Bucket:imageBucket,Key:key}));throw error}if(old.rows[0].logo_key){try{await s3.send(new DeleteObjectCommand({Bucket:imageBucket,Key:old.rows[0].logo_key}))}catch(error){console.error("Could not remove replaced school logo",error)}}const logoUrl=await getSignedUrl(s3,new GetObjectCommand({Bucket:imageBucket,Key:key}),{expiresIn:3600});return c.json({logoUrl},201)});
   app.post("/api/school-profile", async (c) => {
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     if (!body || typeof body.schoolName !== "string" || !body.schoolName.trim()) return c.json({ error: "School name is required." }, 400);
@@ -67,11 +73,33 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     if (!context) return c.json({ error: "Not allowed to edit school settings." }, 403);
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     if (!body || typeof body.schoolName !== "string" || !body.schoolName.trim()) return c.json({ error: "School name is required." }, 400);
-    const vals = ["schoolName","schoolType","email","phone","address","website","motto"].map((key) => typeof body[key] === "string" ? (body[key] as string).trim() : "");
-    const result = await pool.query("UPDATE school_profiles SET school_name=$2, school_type=$3, contact_email=$4, phone=$5, address=$6, website=$7, motto=$8, updated_at=now() WHERE user_id=$1 RETURNING school_name, school_type, contact_email, phone, address, website, motto", [context.schoolId, ...vals]);
-    return c.json(result.rows[0]);
+    const term = typeof body.activeTerm === "string" ? body.activeTerm : "";
+    if (term && !["Term 1", "Term 2", "Term 3"].includes(term)) return c.json({ error: "Choose Term 1, Term 2, or Term 3." }, 400);
+    const academicYear = typeof body.academicYear === "string" ? body.academicYear.trim() : "";
+    if (academicYear && !/^20\d{2}$/.test(academicYear)) return c.json({ error: "Academic year must be a four-digit year." }, 400);
+    const fields = ["schoolName","schoolType","email","phone","address","website","motto","vision"];
+    const vals = fields.map(key => typeof body[key] === "string" ? (body[key] as string).trim() : "");
+    const dates = ["term1StartDate","term1EndDate","term2StartDate","term2EndDate","term3StartDate","term3EndDate"].map(key => typeof body[key] === "string" ? body[key] : "");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const old = await client.query("SELECT academic_year,active_term FROM school_profiles WHERE user_id=$1 FOR UPDATE", [context.schoolId]);
+      const result = await client.query(`UPDATE school_profiles SET school_name=$2,school_type=$3,contact_email=$4,phone=$5,address=$6,website=$7,motto=$8,vision=$9,academic_year=$10,active_term=$11,term1_start_date=NULLIF($12,'')::date,term1_end_date=NULLIF($13,'')::date,term2_start_date=NULLIF($14,'')::date,term2_end_date=NULLIF($15,'')::date,term3_start_date=NULLIF($16,'')::date,term3_end_date=NULLIF($17,'')::date,updated_at=now() WHERE user_id=$1 RETURNING school_name,school_type,contact_email,phone,address,website,motto,vision,academic_year AS "academicYear",active_term AS "activeTerm",term1_start_date AS "term1StartDate",term1_end_date AS "term1EndDate",term2_start_date AS "term2StartDate",term2_end_date AS "term2EndDate",term3_start_date AS "term3StartDate",term3_end_date AS "term3EndDate"`, [context.schoolId,...vals,academicYear,term,...dates]);
+      const previousTerm = old.rows[0] ? `${old.rows[0].active_term} ${old.rows[0].academic_year}`.trim() : "";
+      const currentTerm = `${term} ${academicYear}`.trim(); let generatedFees = 0;
+      if (term && academicYear && previousTerm !== currentTerm) {
+        const number = Number(term.match(/[123]/)?.[0]); const termKey = `term${number}Fee`;
+        const generated = await client.query(`INSERT INTO school_fee_entries(school_owner_id,student_id,term,entry_type,debit,comment)
+          SELECT s.school_owner_id,s.id,$2,'Fee obligation',COALESCE(NULLIF(c.stream_fees->s.stream->>$3,'')::numeric,CASE $4::int WHEN 1 THEN c.term1_fee WHEN 2 THEN c.term2_fee ELSE c.term3_fee END)+COALESCE(NULLIF(c.stream_fees->s.stream->>'extraFee','')::numeric,c.extra_fee),c.name||' term fees'
+          FROM school_students s JOIN school_classes c ON c.school_owner_id=s.school_owner_id AND c.name=s.class_name
+          WHERE s.school_owner_id=$1 AND s.status='Active' AND NOT EXISTS(SELECT 1 FROM school_fee_entries f WHERE f.school_owner_id=s.school_owner_id AND f.student_id=s.id AND f.term=$2 AND f.entry_type='Fee obligation' AND f.comment=c.name||' term fees') RETURNING id`, [context.schoolId,currentTerm,termKey,number]);
+        generatedFees = generated.rowCount ?? 0;
+      }
+      await client.query("COMMIT");
+      return c.json({ ...result.rows[0], generatedFees });
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
   });
-
   app.get("/api/students", async (c) => {
     const context = await guard(c, "view_students"); if (!context) return c.json({ error: "Not allowed to view students." }, 403);
     const result = await pool.query("SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, phone, address, admitted_on AS admitted, status FROM school_students WHERE school_owner_id=$1 ORDER BY last_name,first_name", [context.schoolId]);
@@ -81,8 +109,13 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "edit_students"); if (!context) return c.json({ error: "Not allowed to edit students." }, 403);
     const b = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     if (!b || typeof b.first !== "string" || !b.first.trim() || typeof b.last !== "string" || !b.last.trim()) return c.json({ error: "First and last name are required." }, 400);
+    const className = typeof b.class === "string" ? b.class.trim() : "";
+    const stream = typeof b.stream === "string" ? b.stream.trim() : "";
+    if (!["Male","Female"].includes(String(b.gender)) || !className || !stream) return c.json({ error: "Choose a gender, class, and stream." }, 400);
+    const classRow = await pool.query("SELECT streams FROM school_classes WHERE school_owner_id=$1 AND name=$2", [context.schoolId,className]);
+    if (!classRow.rowCount || !(classRow.rows[0].streams as string[]).includes(stream)) return c.json({ error: "Choose a stream configured for the selected class." }, 400);
     const adm = typeof b.adm === "string" && b.adm.trim() ? b.adm.trim() : `SY-${randomUUID().slice(0,8).toUpperCase()}`;
-    const vals = [b.gender,b.dob,b.class,b.stream,b.guardian,b.phone,b.address,b.admitted,b.status].map((v) => typeof v === "string" ? v : "");
+    const vals = [b.gender,b.dob,className,stream,b.guardian,b.phone,b.address,b.admitted,b.status].map((v) => typeof v === "string" ? v : "");
     try {
       const result = await pool.query(
         `INSERT INTO school_students (school_owner_id,admission_no,first_name,last_name,gender,date_of_birth,class_name,stream,guardian,phone,address,admitted_on,status)
@@ -96,26 +129,70 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
   });
   app.get("/api/students/:id", async (c) => {
     const context = await guard(c, "view_students"); if (!context) return c.json({ error: "Not allowed to view students." }, 403);
-    const student = await pool.query("SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, phone, address, admitted_on AS admitted, status FROM school_students WHERE id=$1 AND school_owner_id=$2", [c.req.param("id"),context.schoolId]);
+    const student = await pool.query("SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, phone, address, admitted_on AS admitted, status, photo_key AS \"photoKey\" FROM school_students WHERE id=$1 AND school_owner_id=$2", [c.req.param("id"),context.schoolId]);
     if (!student.rowCount) return c.json({ error: "Student not found." }, 404);
+    const row=student.rows[0]; const photoUrl=row.photoKey?await getSignedUrl(s3,new GetObjectCommand({Bucket:imageBucket,Key:row.photoKey}),{expiresIn:3600}):"";
     const fees = await pool.query("SELECT id, entry_date AS date, term, entry_type AS entry, debit, credit, method, reference, comment FROM school_fee_entries WHERE student_id=$1 AND school_owner_id=$2 ORDER BY entry_date DESC,created_at DESC", [c.req.param("id"),context.schoolId]);
-    return c.json({ student: student.rows[0], fees: fees.rows });
+    return c.json({student:{...row,photoUrl},fees:fees.rows});
   });
-  app.post("/api/students/:id/fees", async (c) => {
+  app.post("/api/students/:id/photo",async(c)=>{
+    const context=await guard(c,"edit_students");if(!context)return c.json({error:"Not allowed to upload student photos."},403);
+    const student=await pool.query("SELECT photo_key FROM school_students WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),context.schoolId]);if(!student.rowCount)return c.json({error:"Student not found."},404);
+    const contentType=String(c.req.header("Content-Type")||"").split(";")[0].toLowerCase();const types=["image/jpeg","image/png","image/webp"];
+    if(!types.includes(contentType))return c.json({error:"Use a JPG, PNG, or WEBP image."},415);
+    const bytes=new Uint8Array(await c.req.arrayBuffer());if(!bytes.length||bytes.byteLength>10*1024*1024)return c.json({error:"Choose an image no larger than 10 MB."},413);
+    const jpeg=bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;const png=bytes.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v);const webp=bytes.length>=12&&String.fromCharCode(...bytes.slice(0,4))==="RIFF"&&String.fromCharCode(...bytes.slice(8,12))==="WEBP";
+    if(!(contentType==="image/jpeg"&&jpeg)&&!(contentType==="image/png"&&png)&&!(contentType==="image/webp"&&webp))return c.json({error:"The file contents do not match a JPG, PNG, or WEBP image."},415);
+    const ext=contentType==="image/jpeg"?"jpg":contentType.slice(6);const key=`students/${context.schoolId}/${c.req.param("id")}/${randomUUID()}.${ext}`;
+    await s3.send(new PutObjectCommand({Bucket:imageBucket,Key:key,Body:bytes,ContentType:contentType,CacheControl:"private, max-age=300"}));
+    try{await pool.query("UPDATE school_students SET photo_key=$3 WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),context.schoolId,key])}catch(error){await s3.send(new DeleteObjectCommand({Bucket:imageBucket,Key:key}));throw error}
+    const previous=student.rows[0].photo_key;if(previous){try{await s3.send(new DeleteObjectCommand({Bucket:imageBucket,Key:previous}))}catch(error){console.error("Could not remove replaced student photo",error)}}
+    const url=await getSignedUrl(s3,new GetObjectCommand({Bucket:imageBucket,Key:key}),{expiresIn:3600});return c.json({photoUrl:url},201);
+  });  app.post("/api/students/:id/fees", async (c) => {
     const context = await guard(c, "edit_fees"); if (!context) return c.json({ error: "Not allowed to record fees." }, 403);
     const b = await c.req.json().catch(() => null) as Record<string, unknown> | null;
-    if (!b || typeof b.entry !== "string" || !["Fee obligation","Payment","Debt added","Credit added","Balance set"].includes(b.entry) || typeof b.amount !== "number" || !Number.isFinite(b.amount) || b.amount <= 0) return c.json({ error: "Choose a valid fee entry and amount." }, 400);
-    const student = await pool.query("SELECT id FROM school_students WHERE id=$1 AND school_owner_id=$2", [c.req.param("id"),context.schoolId]);
-    if (!student.rowCount) return c.json({ error: "Student not found." }, 404);
-    const debit = ["Fee obligation","Debt added"].includes(b.entry) ? b.amount : 0;
-    const credit = ["Payment","Credit added"].includes(b.entry) ? b.amount : 0;
-    const result = await pool.query("INSERT INTO school_fee_entries (school_owner_id,student_id,term,entry_type,debit,credit,method,reference,comment) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, entry_date AS date, term, entry_type AS entry, debit, credit, method, reference, comment", [context.schoolId,c.req.param("id"),typeof b.term === "string" ? b.term : "",b.entry,debit,credit,typeof b.method === "string" ? b.method : "",typeof b.reference === "string" ? b.reference : "",typeof b.comment === "string" ? b.comment : ""]);
-    return c.json(result.rows[0],201);
+    const allowed = ["Payment", "Debt added", "Credit added", "Balance set"];
+    const entry = String(b?.entry || ""); const amount = Number(b?.amount);
+    if (!b || !allowed.includes(entry) || !Number.isFinite(amount) || amount < 0 || (entry !== "Balance set" && amount <= 0)) return c.json({ error: "Choose a valid fee entry and amount." }, 400);
+    const method = typeof b.method === "string" ? b.method : "";
+    if (entry === "Payment" && !["M-Pesa", "Cash", "Bank", "Card", "Other"].includes(method)) return c.json({ error: "Choose a valid payment method." }, 400);
+    const comment = typeof b.comment === "string" ? b.comment.trim() : "";
+    if (entry !== "Payment" && !comment) return c.json({ error: "A reason is required for fee adjustments." }, 400);
+    const entryDate = typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : new Date().toISOString().slice(0, 10);
+    const requestKey = typeof b.requestId === "string" && b.requestId.length <= 100 ? b.requestId : null;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const student = await client.query("SELECT id FROM school_students WHERE id=$1 AND school_owner_id=$2 FOR UPDATE", [c.req.param("id"), context.schoolId]);
+      if (!student.rowCount) { await client.query("ROLLBACK"); return c.json({ error: "Student not found." }, 404); }
+      if (requestKey) {
+        const prior = await client.query("SELECT id,entry_date AS date,term,entry_type AS entry,debit,credit,method,reference,comment FROM school_fee_entries WHERE school_owner_id=$1 AND request_key=$2", [context.schoolId, requestKey]);
+        if (prior.rowCount) { await client.query("COMMIT"); return c.json(prior.rows[0]); }
+      }
+      const current = await client.query("SELECT COALESCE(sum(debit-credit),0) AS balance FROM school_fee_entries WHERE school_owner_id=$1 AND student_id=$2", [context.schoolId, c.req.param("id")]);
+      const previousBalance = Number(current.rows[0].balance);
+      let debit = entry === "Debt added" ? amount : 0; let credit = entry === "Credit added" || entry === "Payment" ? amount : 0;
+      let details = comment;
+      if (entry === "Balance set") {
+        debit = Math.max(0, amount - previousBalance); credit = Math.max(0, previousBalance - amount);
+        details = `Previous balance: KES ${previousBalance.toFixed(2)}; new balance: KES ${amount.toFixed(2)}. Reason: ${comment}`;
+      }
+      const result = await client.query("INSERT INTO school_fee_entries(school_owner_id,student_id,entry_date,term,entry_type,debit,credit,method,reference,comment,request_key) VALUES($1,$2,$3::date,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id,entry_date AS date,term,entry_type AS entry,debit,credit,method,reference,comment", [context.schoolId,c.req.param("id"),entryDate,typeof b.term === "string" ? b.term.trim() : "",entry,debit,credit,method,typeof b.reference === "string" ? b.reference.trim() : "",details,requestKey]);
+      await client.query("COMMIT");
+      return c.json({ ...result.rows[0], balance: previousBalance + debit - credit }, 201);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (requestKey && (error as { code?: string }).code === "23505") {
+        const prior = await pool.query("SELECT id,entry_date AS date,term,entry_type AS entry,debit,credit,method,reference,comment FROM school_fee_entries WHERE school_owner_id=$1 AND request_key=$2", [context.schoolId, requestKey]);
+        if (prior.rowCount) return c.json(prior.rows[0]);
+      }
+      return c.json({ error: "Could not record the fee entry." }, 400);
+    } finally { client.release(); }
   });
 
   app.delete("/api/students/:id", async (c) => {
     const context = await guard(c, "edit_students"); if (!context) return c.json({ error: "Not allowed to edit students." }, 403);
-    await pool.query("DELETE FROM school_students WHERE id=$1 AND school_owner_id=$2", [c.req.param("id"),context.schoolId]);
+    const found=await pool.query("SELECT photo_key FROM school_students WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),context.schoolId]); if(!found.rowCount)return c.json({error:"Student not found."},404); await pool.query("DELETE FROM school_students WHERE id=$1 AND school_owner_id=$2", [c.req.param("id"),context.schoolId]); if(found.rows[0].photo_key)await s3.send(new DeleteObjectCommand({Bucket:imageBucket,Key:found.rows[0].photo_key}));
     return c.json({ ok: true });
   });
   app.get("/api/fees", async (c) => {
@@ -126,18 +203,20 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       WHERE s.school_owner_id=$1 GROUP BY s.id ORDER BY s.last_name,s.first_name`, [context.schoolId]);
     return c.json(result.rows);
   });
-  app.get("/api/attendance", async (c) => {
+  app.get("/api/reports/students",async(c)=>{const x=await guard(c,"view_students");if(!x)return c.json({error:"Not allowed to view student reports."},403);const className=String(c.req.query("class")||"");const stream=String(c.req.query("stream")||"");const r=await pool.query(`SELECT admission_no AS adm,first_name AS first,last_name AS last,gender,class_name AS class,stream,guardian,phone,status FROM school_students WHERE school_owner_id=$1 AND ($2='' OR class_name=$2) AND ($3='' OR stream=$3) ORDER BY class_name,stream,last_name,first_name`,[x.schoolId,className,stream]);return c.json(r.rows)});
+  app.get("/api/reports/fees",async(c)=>{const x=await guard(c,"view_fees");if(!x)return c.json({error:"Not allowed to view fee reports."},403);const term=String(c.req.query("term")||"");const className=String(c.req.query("class")||"");const stream=String(c.req.query("stream")||"");const r=await pool.query(`SELECT s.id,s.admission_no AS adm,s.first_name AS first,s.last_name AS last,s.class_name AS class,s.stream,COALESCE(sum(f.debit),0) AS billed,COALESCE(sum(f.credit),0) AS paid,COALESCE(sum(f.debit-f.credit),0) AS balance FROM school_students s LEFT JOIN school_fee_entries f ON f.student_id=s.id AND f.school_owner_id=s.school_owner_id AND ($2='' OR f.term=$2) WHERE s.school_owner_id=$1 AND ($3='' OR s.class_name=$3) AND ($4='' OR s.stream=$4) GROUP BY s.id ORDER BY s.class_name,s.stream,s.last_name,s.first_name`,[x.schoolId,term,className,stream]);return c.json(r.rows)});
+  app.get("/api/reports/attendance",async(c)=>{const x=await guard(c,"view_attendance");if(!x)return c.json({error:"Not allowed to view attendance reports."},403);const date=String(c.req.query("date")||new Date().toISOString().slice(0,10));const className=String(c.req.query("class")||"");const stream=String(c.req.query("stream")||"");const r=await pool.query(`SELECT s.admission_no AS adm,s.first_name AS first,s.last_name AS last,s.class_name AS class,s.stream,COALESCE(a.status,'Not marked') AS status FROM school_students s LEFT JOIN school_attendance a ON a.student_id=s.id AND a.attendance_date=$2 WHERE s.school_owner_id=$1 AND ($3='' OR s.class_name=$3) AND ($4='' OR s.stream=$4) ORDER BY s.class_name,s.stream,s.last_name,s.first_name`,[x.schoolId,date,className,stream]);return c.json(r.rows)});  app.get("/api/attendance", async (c) => {
     const context=await guard(c,"view_attendance"); if(!context)return c.json({error:"Not allowed to view attendance."},403);
     const date=String(c.req.query("date")||new Date().toISOString().slice(0,10));
+    const className=String(c.req.query("class")||""); const stream=String(c.req.query("stream")||"");
     const result=await pool.query(`SELECT s.id,s.admission_no AS adm,s.first_name AS first,s.last_name AS last,s.class_name AS class,s.stream,a.status
       FROM school_students s LEFT JOIN school_attendance a ON a.student_id=s.id AND a.attendance_date=$2
-      WHERE s.school_owner_id=$1 AND s.status='Active' ORDER BY s.class_name,s.last_name,s.first_name`,[context.schoolId,date]);
-    return c.json(result.rows);
+      WHERE s.school_owner_id=$1 AND s.status='Active' AND ($3='' OR s.class_name=$3) AND ($4='' OR s.stream=$4) ORDER BY s.class_name,s.stream,s.last_name,s.first_name`,[context.schoolId,date,className,stream]);    return c.json(result.rows);
   });
   app.post("/api/attendance",async(c)=>{
     const context=await guard(c,"edit_attendance");if(!context)return c.json({error:"Not allowed to edit attendance."},403);
     const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;
-    if(typeof b?.studentId!=="string"||!['Present','Absent','Late'].includes(String(b.status)))return c.json({error:"Choose a student and valid attendance status."},400);
+    if(typeof b?.studentId!=="string"||!['Present','Absent','Late','Excused'].includes(String(b.status)))return c.json({error:"Choose a student and valid attendance status."},400);
     const student=await pool.query("SELECT id FROM school_students WHERE id=$1 AND school_owner_id=$2",[b.studentId,context.schoolId]);if(!student.rowCount)return c.json({error:"Student not found."},404);
     const date=typeof b.date==="string"?b.date:new Date().toISOString().slice(0,10);
     const r=await pool.query("INSERT INTO school_attendance (school_owner_id,student_id,attendance_date,status,recorded_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(student_id,attendance_date) DO UPDATE SET status=EXCLUDED.status,recorded_by=EXCLUDED.recorded_by RETURNING id,status",[context.schoolId,b.studentId,date,b.status,c.get("userId")]);return c.json(r.rows[0]);
@@ -168,7 +247,36 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     if (!result.rowCount) return c.json({ error: "Staff member not found or protected." },404);
     return c.json(result.rows[0]);
   });
-  app.post("/api/staff/accept-invite", async (c) => {
+  app.get("/api/staff/:id/assignments", async (c) => {
+    const context = await guard(c,"manage_staff"); if (!context) return c.json({error:"Only administrators can view assignments."},403);
+    const result=await pool.query(`SELECT a.id,a.class_id AS "classId",c.name AS "className",a.stream,a.subjects FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id AND c.school_owner_id=a.school_owner_id WHERE a.school_owner_id=$1 AND a.user_id=$2 ORDER BY c.name,a.stream`,[context.schoolId,c.req.param("id")]);
+    return c.json(result.rows);
+  });
+  app.put("/api/staff/:id/assignments", async (c) => {
+    const context=await guard(c,"manage_staff"); if(!context)return c.json({error:"Only administrators can edit assignments."},403);
+    const body=await c.req.json().catch(()=>null) as Record<string,unknown>|null;
+    const rows=Array.isArray(body?.assignments)?body.assignments as Record<string,unknown>[]:null;
+    if(!rows)return c.json({error:"Assignments must be a list."},400);
+    const client=await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const member=await client.query("SELECT user_id FROM school_staff WHERE user_id=$1 AND school_owner_id=$2 AND role='Teacher' FOR UPDATE",[c.req.param("id"),context.schoolId]);
+      if(!member.rowCount){await client.query("ROLLBACK");return c.json({error:"Teacher not found."},404)}
+      const clean:Array<{classId:string;stream:string;subjects:string[]}>=[];
+      for(const row of rows){
+        const classId=typeof row.classId==="string"?row.classId:"";const stream=typeof row.stream==="string"?row.stream.trim():"";
+        const cls=await client.query("SELECT name,streams,subjects FROM school_classes WHERE id=$1 AND school_owner_id=$2",[classId,context.schoolId]);
+        if(!cls.rowCount||(cls.rows[0].streams as string[]).indexOf(stream)<0){await client.query("ROLLBACK");return c.json({error:"Every assignment must use a configured class and one of its streams."},400)}
+        const valid=cls.rows[0].subjects as string[];const subjects=Array.isArray(row.subjects)?row.subjects.filter((x):x is string=>typeof x==="string"):[];
+        if(!subjects.length||subjects.some(subject=>!valid.includes(subject))){await client.query("ROLLBACK");return c.json({error:`Choose subjects configured for ${cls.rows[0].name}.`},400)}
+        if(clean.some(x=>x.classId===classId&&x.stream===stream)){await client.query("ROLLBACK");return c.json({error:"Remove duplicate class and stream assignment rows."},400)}
+        clean.push({classId,stream,subjects});
+      }
+      await client.query("DELETE FROM school_teacher_assignments WHERE school_owner_id=$1 AND user_id=$2",[context.schoolId,c.req.param("id")]);
+      for(const row of clean)await client.query("INSERT INTO school_teacher_assignments(school_owner_id,user_id,class_id,stream,subjects) VALUES($1,$2,$3,$4,$5::jsonb)",[context.schoolId,c.req.param("id"),row.classId,row.stream,JSON.stringify(row.subjects)]);
+      await client.query("COMMIT");return c.json({assignments:clean.length});
+    }catch(error){await client.query("ROLLBACK");return c.json({error:"Could not save teacher assignments."},400)}finally{client.release()}
+  });  app.post("/api/staff/accept-invite", async (c) => {
     const b = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     if (typeof b?.code !== "string") return c.json({ error: "Invitation code required." },400);
     const email = String(c.get("userEmail") || "").toLowerCase();
@@ -180,31 +288,63 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
   });
 
   app.get("/api/classes", async (c) => {
-    const context = await guard(c,"view_classes"); if(!context) return c.json({error:"Not allowed to view classes."},403);
-    return c.json((await pool.query("SELECT id,name,streams,subjects,term_fee AS \"termFee\",extra_fee AS \"extraFee\" FROM school_classes WHERE school_owner_id=$1 ORDER BY name",[context.schoolId])).rows);
+    const x = await contextFor(c);
+    if (!x || (!x.permissions.includes("view_classes") && !x.permissions.includes("view_students") && !x.permissions.includes("edit_students") && x.role !== "Admin")) return c.json({ error: "Not allowed to view classes." }, 403);
+    return c.json((await pool.query(`SELECT id,name,streams,subjects,term1_fee AS "term1Fee",term2_fee AS "term2Fee",term3_fee AS "term3Fee",extra_fee AS "extraFee",stream_fees AS "streamFees" FROM school_classes WHERE school_owner_id=$1 ORDER BY name`, [x.schoolId])).rows);
   });
   app.post("/api/classes", async (c) => {
-    const context=await guard(c,"edit_classes"); if(!context) return c.json({error:"Not allowed to edit classes."},403);
+    const x = await guard(c, "edit_classes"); if (!x) return c.json({ error: "Not allowed to edit classes." }, 403);
+    const b = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+    if (typeof b?.name !== "string" || !b.name.trim()) return c.json({ error: "Class name is required." }, 400);
+    const strings = (v: unknown) => Array.isArray(v) ? v.filter((a): a is string => typeof a === "string").map(a => a.trim()).filter(Boolean) : [];
+    const streams = strings(b.streams), subjects = strings(b.subjects);
+    const fee = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+    const streamFees = typeof b.streamFees === "object" && b.streamFees !== null ? b.streamFees as Record<string, unknown> : {};
+    for (const key of Object.keys(streamFees)) if (!streams.includes(key)) return c.json({ error: `Fee override stream '${key}' is not configured for this class.` }, 400);
+    const optionalFee = (v: unknown): number | null => v === null || v === undefined || v === "" ? null : (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+    const cleanOverrides: Record<string, { term1Fee:number|null; term2Fee:number|null; term3Fee:number|null; extraFee:number|null }> = {};
+    for (const stream of streams) { const value = typeof streamFees[stream] === "object" && streamFees[stream] !== null ? streamFees[stream] as Record<string, unknown> : {}; cleanOverrides[stream] = { term1Fee:optionalFee(value.term1Fee), term2Fee:optionalFee(value.term2Fee), term3Fee:optionalFee(value.term3Fee), extraFee:optionalFee(value.extraFee) }; }
+    const t1=fee(b.term1Fee), t2=fee(b.term2Fee), t3=fee(b.term3Fee), extra=fee(b.extraFee);
+    const result = await pool.query(`INSERT INTO school_classes(school_owner_id,name,streams,subjects,term_fee,term1_fee,term2_fee,term3_fee,extra_fee,stream_fees) VALUES($1,$2,$3::jsonb,$4::jsonb,$5,$5,$6,$7,$8,$9::jsonb) ON CONFLICT(school_owner_id,name) DO UPDATE SET streams=EXCLUDED.streams,subjects=EXCLUDED.subjects,term_fee=EXCLUDED.term1_fee,term1_fee=EXCLUDED.term1_fee,term2_fee=EXCLUDED.term2_fee,term3_fee=EXCLUDED.term3_fee,extra_fee=EXCLUDED.extra_fee,stream_fees=EXCLUDED.stream_fees RETURNING id,name,streams,subjects,term1_fee AS "term1Fee",term2_fee AS "term2Fee",term3_fee AS "term3Fee",extra_fee AS "extraFee",stream_fees AS "streamFees"`, [x.schoolId,b.name.trim(),JSON.stringify(streams),JSON.stringify(subjects),t1,t2,t3,extra,JSON.stringify(cleanOverrides)]);
+    return c.json(result.rows[0], 201);
+  });  app.post("/api/classes/generate-fees",async(c)=>{
+    const x=await guard(c,"edit_fees"); if(!x)return c.json({error:"Not allowed to generate fee obligations."},403);
     const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;
-    if(typeof b?.name!=="string"||!b.name.trim()) return c.json({error:"Class name is required."},400);
-    const strings=(v:unknown)=>Array.isArray(v)?v.filter((x):x is string=>typeof x==="string"):[];
-    const r=await pool.query("INSERT INTO school_classes (school_owner_id,name,streams,subjects,term_fee,extra_fee) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6) ON CONFLICT(school_owner_id,name) DO UPDATE SET streams=EXCLUDED.streams,subjects=EXCLUDED.subjects,term_fee=EXCLUDED.term_fee,extra_fee=EXCLUDED.extra_fee RETURNING id,name,streams,subjects,term_fee AS \"termFee\",extra_fee AS \"extraFee\"",[context.schoolId,b.name.trim(),JSON.stringify(strings(b.streams)),JSON.stringify(strings(b.subjects)),Number(b.termFee)||0,Number(b.extraFee)||0]);
-    return c.json(r.rows[0],201);
+    const term=typeof b?.term==="string"?b.term.trim():""; const match=term.match(/\bterm\s*([123])\b/i);
+    if(!match)return c.json({error:"Enter a term such as Term 1 2027."},400);
+    const termNumber=Number(match[1]); const termKey=`term${termNumber}Fee`;
+    const r=await pool.query(`INSERT INTO school_fee_entries(school_owner_id,student_id,term,entry_type,debit,comment)
+      SELECT s.school_owner_id,s.id,$2,'Fee obligation',
+        COALESCE(NULLIF(c.stream_fees->s.stream->>$3,'')::numeric, CASE $4::int WHEN 1 THEN c.term1_fee WHEN 2 THEN c.term2_fee ELSE c.term3_fee END)
+        + COALESCE(NULLIF(c.stream_fees->s.stream->>'extraFee','')::numeric,c.extra_fee), c.name||' term fees'
+      FROM school_students s JOIN school_classes c ON c.school_owner_id=s.school_owner_id AND c.name=s.class_name
+      WHERE s.school_owner_id=$1 AND s.status='Active' AND NOT EXISTS(SELECT 1 FROM school_fee_entries f WHERE f.school_owner_id=s.school_owner_id AND f.student_id=s.id AND f.term=$2 AND f.entry_type='Fee obligation' AND f.comment=c.name||' term fees')
+      RETURNING id`,[x.schoolId,term,termKey,termNumber]);
+    return c.json({created:r.rowCount??0,term});
+  });app.put("/api/classes/:id",async(c)=>{
+    const x=await guard(c,"edit_classes");if(!x)return c.json({error:"Not allowed."},403);
+    const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;
+    const list=(v:unknown)=>Array.isArray(v)?v.filter((a):a is string=>typeof a==="string").map(a=>a.trim()).filter(Boolean):[];
+    const streams=list(b?.streams),subjects=list(b?.subjects);
+    const existing=await pool.query("SELECT name,streams FROM school_classes WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),x.schoolId]);
+    if(!existing.rowCount)return c.json({error:"Class not found."},404);
+    const removed=(existing.rows[0].streams as string[]).filter(s=>!streams.includes(s));
+    if(removed.length){const assigned=await pool.query("SELECT 1 FROM school_students WHERE school_owner_id=$1 AND class_name=$2 AND stream=ANY($3::text[]) LIMIT 1",[x.schoolId,existing.rows[0].name,removed]);if(assigned.rowCount)return c.json({error:"A stream with assigned students cannot be removed."},409)}
+    const fee=(v:unknown)=>typeof v==="number"&&Number.isFinite(v)&&v>=0?v:0;
+    const optional=(v:unknown)=>v===null||v===undefined||v===""?null:fee(v);
+    const overrides=typeof b?.streamFees==="object"&&b.streamFees!==null?b.streamFees as Record<string,Record<string,unknown>>:{};
+    const clean:Record<string,unknown>={};for(const stream of streams){const v=overrides[stream]||{};clean[stream]={term1Fee:optional(v.term1Fee),term2Fee:optional(v.term2Fee),term3Fee:optional(v.term3Fee),extraFee:optional(v.extraFee)}}
+    const r=await pool.query(`UPDATE school_classes SET streams=$3::jsonb,subjects=$4::jsonb,term_fee=$5,term1_fee=$5,term2_fee=$6,term3_fee=$7,extra_fee=$8,stream_fees=$9::jsonb WHERE id=$1 AND school_owner_id=$2 RETURNING id,name,streams,subjects,term1_fee AS "term1Fee",term2_fee AS "term2Fee",term3_fee AS "term3Fee",extra_fee AS "extraFee",stream_fees AS "streamFees"`,[c.req.param("id"),x.schoolId,JSON.stringify(streams),JSON.stringify(subjects),fee(b?.term1Fee),fee(b?.term2Fee),fee(b?.term3Fee),fee(b?.extraFee),JSON.stringify(clean)]);return c.json(r.rows[0]);
   });
-  app.post("/api/classes/generate-fees",async(c)=>{const x=await guard(c,"edit_fees");if(!x)return c.json({error:"Not allowed to generate fee obligations."},403);const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;const term=typeof b?.term==="string"?b.term:"";if(!term)return c.json({error:"Term is required."},400);const r=await pool.query(`INSERT INTO school_fee_entries (school_owner_id,student_id,term,entry_type,debit,comment)
-    SELECT s.school_owner_id,s.id,$2,'Fee obligation',c.term_fee+c.extra_fee,c.name||' class fees'
-    FROM school_students s JOIN school_classes c ON c.school_owner_id=s.school_owner_id AND c.name=s.class_name
-    WHERE s.school_owner_id=$1 AND s.status='Active' RETURNING id`,[x.schoolId,term]);return c.json({created:r.rowCount})});  app.delete("/api/classes/:id", async (c)=>{const x=await guard(c,"edit_classes");if(!x)return c.json({error:"Not allowed."},403);await pool.query("DELETE FROM school_classes WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),x.schoolId]);return c.json({ok:true})});
-
-  app.get("/api/announcements",async(c)=>{const x=await guard(c,"view_announcements");if(!x)return c.json({error:"Not allowed to view announcements."},403);await pool.query("DELETE FROM school_announcements WHERE school_owner_id=$1 AND expires_at<=now()",[x.schoolId]);return c.json((await pool.query("SELECT id,title,body,author_name AS \"authorName\",created_at AS \"createdAt\",expires_at AS \"expiresAt\" FROM school_announcements WHERE school_owner_id=$1 AND expires_at>now() ORDER BY created_at DESC",[x.schoolId])).rows)});
+  app.delete("/api/classes/:id",async(c)=>{const x=await guard(c,"edit_classes");if(!x)return c.json({error:"Not allowed."},403);const r=await pool.query("DELETE FROM school_classes c WHERE c.id=$1 AND c.school_owner_id=$2 AND NOT EXISTS(SELECT 1 FROM school_students s WHERE s.school_owner_id=c.school_owner_id AND s.class_name=c.name) RETURNING c.id",[c.req.param("id"),x.schoolId]);if(!r.rowCount)return c.json({error:"Class not found or students are still assigned to it."},409);return c.json({ok:true})});app.get("/api/announcements",async(c)=>{const x=await guard(c,"view_announcements");if(!x)return c.json({error:"Not allowed to view announcements."},403);await pool.query("DELETE FROM school_announcements WHERE school_owner_id=$1 AND expires_at<=now()",[x.schoolId]);return c.json((await pool.query("SELECT id,title,body,author_name AS \"authorName\",created_at AS \"createdAt\",expires_at AS \"expiresAt\" FROM school_announcements WHERE school_owner_id=$1 AND expires_at>now() ORDER BY created_at DESC",[x.schoolId])).rows)});
   app.post("/api/announcements",async(c)=>{const x=await guard(c,"manage_announcements");if(!x)return c.json({error:"You do not have permission to create announcements."},403);const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;if(typeof b?.title!=="string"||!b.title.trim()||typeof b.body!=="string"||!b.body.trim())return c.json({error:"Title and announcement are required."},400);const expiry=new Date(String(b.expiresAt||""));if(!Number.isFinite(expiry.getTime())||expiry<=new Date())return c.json({error:"Choose a future expiry date."},400);const r=await pool.query("INSERT INTO school_announcements (school_owner_id,title,body,author_user_id,author_name,expires_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,title,body,author_name AS \"authorName\",created_at AS \"createdAt\",expires_at AS \"expiresAt\"",[x.schoolId,b.title.trim(),b.body.trim(),c.get("userId"),x.name,expiry.toISOString()]);return c.json(r.rows[0],201)});
   app.delete("/api/announcements/:id",async(c)=>{const x=await guard(c,"manage_announcements");if(!x)return c.json({error:"You do not have permission to delete announcements."},403);await pool.query("DELETE FROM school_announcements WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),x.schoolId]);return c.json({ok:true})});
 
-  app.get("/api/exams", async (c) => { const x = await guard(c,"view_exams"); if (!x) return c.json({error:"Not allowed to view exams."},403); return c.json((await pool.query(`SELECT e.id,e.name,e.class_name AS "className",e.stream,e.term,e.starts_on AS "startsOn",e.ends_on AS "endsOn",count(m.id) FILTER (WHERE m.status='Pending') AS pending FROM school_exams e LEFT JOIN school_marks m ON m.exam_id=e.id WHERE e.school_owner_id=$1 GROUP BY e.id ORDER BY e.created_at DESC`,[x.schoolId])).rows); });
-  app.post("/api/exams", async (c) => { const x = await guard(c,"edit_exams"); if (!x) return c.json({error:"Not allowed to create exams."},403); const b = await c.req.json().catch(()=>null) as Record<string,unknown>|null; if (typeof b?.name!=="string"||typeof b.className!=="string"||typeof b.startsOn!=="string"||typeof b.endsOn!=="string"||b.endsOn<b.startsOn) return c.json({error:"Exam name, class, and valid dates are required."},400); const cls=await pool.query("SELECT subjects FROM school_classes WHERE school_owner_id=$1 AND name=$2",[x.schoolId,b.className]); if (!cls.rowCount) return c.json({error:"Choose a class configured in this school."},400); const result=await pool.query("INSERT INTO school_exams(school_owner_id,name,class_name,stream,term,starts_on,ends_on) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",[x.schoolId,b.name.trim(),b.className,String(b.stream||""),String(b.term||""),b.startsOn,b.endsOn]); const id=result.rows[0].id; await pool.query(`INSERT INTO school_marks(school_owner_id,exam_id,student_id,subject,score,entered_by) SELECT $1,$2,s.id,sub.value,0,$3 FROM school_students s CROSS JOIN LATERAL jsonb_array_elements_text($4::jsonb) AS sub(value) WHERE s.school_owner_id=$1 AND s.class_name=$5 AND s.stream=$6 AND s.status='Active' ON CONFLICT(exam_id,student_id,subject) DO NOTHING`,[x.schoolId,id,c.get("userId"),JSON.stringify(cls.rows[0].subjects||[]),b.className,String(b.stream||"")]); return c.json({id},201); });
-  app.get("/api/exams/:id/marks", async(c)=>{const x=await guard(c,"view_exams");if(!x)return c.json({error:"Not allowed."},403);const r=await pool.query(`SELECT m.id,s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status FROM school_marks m JOIN school_students s ON s.id=m.student_id AND s.school_owner_id=m.school_owner_id JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.exam_id=$1 AND m.school_owner_id=$2 ORDER BY s.last_name,s.first_name,m.subject`,[c.req.param("id"),x.schoolId]);return c.json(r.rows)});
-  app.patch("/api/marks/:id",async(c)=>{const x=await guard(c,"edit_exams");if(!x)return c.json({error:"Not allowed to edit marks."},403);const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;const score=Number(b?.score);const status=b?.status;if(!Number.isFinite(score)||score<0||score>100||!['Pending','Approved','Denied'].includes(String(status)))return c.json({error:"Score must be between 0 and 100 and status must be valid."},400);const r=await pool.query(`UPDATE school_marks m SET score=$3,status=$4 FROM school_exams e WHERE m.id=$1 AND m.school_owner_id=$2 AND e.id=m.exam_id AND e.school_owner_id=m.school_owner_id RETURNING m.id`,[c.req.param("id"),x.schoolId,score,status]);if(!r.rowCount)return c.json({error:"Mark not found."},404);return c.json((await pool.query("SELECT m.id,s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status FROM school_marks m JOIN school_students s ON s.id=m.student_id WHERE m.id=$1",[c.req.param("id")])).rows[0])});
-  app.get("/api/students/:id/report-card",async(c)=>{const x=await guard(c,"view_exams");if(!x)return c.json({error:"Not allowed to view report cards."},403);const r=await pool.query(`SELECT e.name AS exam,e.term,m.subject,m.score FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' ORDER BY e.created_at,m.subject`,[c.req.param("id"),x.schoolId]);return c.json(r.rows)});
+  app.get("/api/exams",async(c)=>{const x=await guard(c,"view_exams");if(!x)return c.json({error:"Not allowed to view exams."},403);const r=await pool.query(`SELECT e.id,e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",e.starts_on AS "startsOn",e.ends_on AS "endsOn",count(m.id) FILTER(WHERE m.status='Pending') AS pending FROM school_exams e LEFT JOIN school_marks m ON m.exam_id=e.id WHERE e.school_owner_id=$1 AND ($2='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=e.school_owner_id AND a.user_id=$3 AND c.name=e.class_name AND a.stream=e.stream)) GROUP BY e.id ORDER BY e.created_at DESC`,[x.schoolId,x.role,c.get("userId")]);return c.json(r.rows)});
+  app.post("/api/exams",async(c)=>{const x=await guard(c,"edit_exams");if(!x)return c.json({error:"Not allowed to create exams."},403);if(x.role!=="Admin")return c.json({error:"Only administrators can create exams."},403);const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;if(typeof b?.name!=="string"||typeof b.className!=="string"||typeof b.startsOn!=="string"||typeof b.endsOn!=="string"||b.endsOn<b.startsOn||typeof b.academicYear!=="string"||!/^20\d{2}$/.test(b.academicYear))return c.json({error:"Exam name, class, and valid dates are required."},400);const stream=String(b.stream||"");const cls=await pool.query("SELECT subjects,streams FROM school_classes WHERE school_owner_id=$1 AND name=$2",[x.schoolId,b.className]);if(!cls.rowCount||!(cls.rows[0].streams as string[]).includes(stream))return c.json({error:"Choose a class and stream configured in this school."},400);const result=await pool.query("INSERT INTO school_exams(school_owner_id,name,class_name,stream,term,academic_year,starts_on,ends_on) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",[x.schoolId,b.name.trim(),b.className,stream,String(b.term||""),b.academicYear,b.startsOn,b.endsOn]);const id=result.rows[0].id;await pool.query(`INSERT INTO school_marks(school_owner_id,exam_id,student_id,subject,score,entered_by) SELECT $1,$2,s.id,sub.value,0,$3 FROM school_students s CROSS JOIN LATERAL jsonb_array_elements_text($4::jsonb) AS sub(value) WHERE s.school_owner_id=$1 AND s.class_name=$5 AND s.stream=$6 AND s.status='Active' ON CONFLICT(exam_id,student_id,subject) DO NOTHING`,[x.schoolId,id,c.get("userId"),JSON.stringify(cls.rows[0].subjects||[]),b.className,stream]);return c.json({id},201)});
+  app.get("/api/exams/:id/marks",async(c)=>{const x=await guard(c,"view_exams");if(!x)return c.json({error:"Not allowed."},403);const r=await pool.query(`SELECT m.id,s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status FROM school_marks m JOIN school_students s ON s.id=m.student_id AND s.school_owner_id=m.school_owner_id JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.exam_id=$1 AND m.school_owner_id=$2 AND ($3='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$4 AND c.name=e.class_name AND a.stream=e.stream AND a.subjects ? m.subject)) ORDER BY s.last_name,s.first_name,m.subject`,[c.req.param("id"),x.schoolId,x.role,c.get("userId")]);return c.json(r.rows)});
+  app.patch("/api/marks/:id",async(c)=>{const x=await guard(c,"edit_exams");if(!x)return c.json({error:"Not allowed to edit marks."},403);const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;const score=Number(b?.score);const status=b?.status;if(!Number.isFinite(score)||score<0||score>100||!['Pending','Approved','Denied'].includes(String(status)))return c.json({error:"Score must be between 0 and 100 and status must be valid."},400);if(x.role!=="Admin"&&status!=="Pending")return c.json({error:"Only administrators can approve or deny marks."},403);const r=await pool.query(`UPDATE school_marks m SET score=$3,status=$4 FROM school_exams e WHERE m.id=$1 AND m.school_owner_id=$2 AND e.id=m.exam_id AND e.school_owner_id=m.school_owner_id AND ($5='Admin' OR (m.status='Pending' AND $4='Pending' AND EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$6 AND c.name=e.class_name AND a.stream=e.stream AND a.subjects ? m.subject))) RETURNING m.id`,[c.req.param("id"),x.schoolId,score,status,x.role,c.get("userId")]);if(!r.rowCount)return c.json({error:"Mark not found or outside your assignment."},404);return c.json((await pool.query("SELECT m.id,s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status FROM school_marks m JOIN school_students s ON s.id=m.student_id WHERE m.id=$1 AND m.school_owner_id=$2",[c.req.param("id"),x.schoolId])).rows[0])});  app.post("/api/exams/:id/approve-pending",async(c)=>{const x=await guard(c,"edit_exams");if(!x)return c.json({error:"Not allowed."},403);if(x.role!=="Admin")return c.json({error:"Only administrators can approve marks."},403);const client=await pool.connect();try{await client.query("BEGIN");const exam=await client.query("SELECT id FROM school_exams WHERE id=$1 AND school_owner_id=$2 FOR UPDATE",[c.req.param("id"),x.schoolId]);if(!exam.rowCount){await client.query("ROLLBACK");return c.json({error:"Exam not found."},404)}const r=await client.query("UPDATE school_marks SET status='Approved' WHERE exam_id=$1 AND school_owner_id=$2 AND status='Pending' RETURNING id",[c.req.param("id"),x.schoolId]);await client.query("COMMIT");return c.json({approved:r.rowCount||0})}catch{await client.query("ROLLBACK");return c.json({error:"Could not approve pending marks."},400)}finally{client.release()}});
+  app.get("/api/exams/:id/report",async(c)=>{const x=await guard(c,"view_exams");if(!x)return c.json({error:"Not allowed."},403);if(x.role!=="Admin")return c.json({error:"Only administrators can view ranked reports."},403);const meta=await pool.query(`SELECT e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",p.school_name AS "schoolName",cl.subjects FROM school_exams e JOIN school_profiles p ON p.user_id=e.school_owner_id JOIN school_classes cl ON cl.school_owner_id=e.school_owner_id AND cl.name=e.class_name WHERE e.id=$1 AND e.school_owner_id=$2`,[c.req.param("id"),x.schoolId]);if(!meta.rowCount)return c.json({error:"Exam not found."},404);const students=await pool.query(`WITH totals AS (SELECT s.id,s.admission_no AS adm,s.first_name||' '||s.last_name AS name,s.stream,COALESCE(sum(m.score) FILTER(WHERE m.status='Approved'),0) AS total,COALESCE(jsonb_object_agg(m.subject,m.score) FILTER(WHERE m.status='Approved'), '{}'::jsonb) AS marks FROM school_exams e JOIN school_students s ON s.school_owner_id=e.school_owner_id AND s.class_name=e.class_name AND s.stream=e.stream AND s.status='Active' LEFT JOIN school_marks m ON m.exam_id=e.id AND m.student_id=s.id AND m.status='Approved' WHERE e.id=$1 AND e.school_owner_id=$2 GROUP BY s.id) SELECT *,DENSE_RANK() OVER(ORDER BY total DESC) AS position FROM totals ORDER BY position,name`,[c.req.param("id"),x.schoolId]);return c.json({...meta.rows[0],subjects:meta.rows[0].subjects||[],students:students.rows})});  app.get("/api/students/:id/report-card",async(c)=>{const x=await guard(c,"view_exams");if(!x)return c.json({error:"Not allowed to view report cards."},403);if(x.role!=="Admin")return c.json({error:"Only administrators can print report cards."},403);const student=await pool.query(`SELECT s.id,s.admission_no AS adm,s.first_name AS first,s.last_name AS last,s.class_name AS "class",s.stream,p.school_name AS "schoolName" FROM school_students s JOIN school_profiles p ON p.user_id=s.school_owner_id WHERE s.id=$1 AND s.school_owner_id=$2`,[c.req.param("id"),x.schoolId]);if(!student.rowCount)return c.json({error:"Student not found."},404);const rows=await pool.query(`SELECT e.id,e.name AS exam,e.term,e.academic_year AS "academicYear",m.subject,m.score FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' ORDER BY e.academic_year,e.created_at,m.subject`,[c.req.param("id"),x.schoolId]);const exams=new Map();for(const r of rows.rows){if(!exams.has(r.id))exams.set(r.id,{id:r.id,exam:r.exam,term:r.term,academicYear:r.academicYear,marks:[],total:0});const e=exams.get(r.id);e.marks.push({subject:r.subject,score:Number(r.score)});e.total+=Number(r.score)}for(const e of exams.values()){const rank=await pool.query(`WITH totals AS (SELECT s.id,COALESCE(sum(m.score) FILTER(WHERE m.status='Approved'),0) AS total FROM school_exams ex JOIN school_students s ON s.school_owner_id=ex.school_owner_id AND s.class_name=ex.class_name AND s.stream=ex.stream AND s.status='Active' LEFT JOIN school_marks m ON m.exam_id=ex.id AND m.student_id=s.id WHERE ex.id=$1 AND ex.school_owner_id=$2 GROUP BY s.id) SELECT DENSE_RANK() OVER(ORDER BY total DESC) AS position FROM totals WHERE id=$3`,[e.id,x.schoolId,c.req.param("id")]);e.position=Number(rank.rows[0]?.position||0)}const terms=await pool.query(`SELECT e.term,e.academic_year AS "academicYear",sum(m.score) AS total FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' GROUP BY e.term,e.academic_year ORDER BY e.academic_year,e.term`,[c.req.param("id"),x.schoolId]);return c.json([...exams.values()].flatMap(e=>e.marks.map(m=>({...m,exam:e.exam,term:e.term,academicYear:e.academicYear,position:e.position,total:e.total,schoolName:student.rows[0].schoolName}))))});
   app.get("/api/events",async(c)=>{const x=await guard(c,"view_announcements");if(!x)return c.json({error:"Not allowed to view school events."},403);return c.json((await pool.query(`SELECT id,title,details,location,starts_at AS "startsAt",author_name AS "authorName" FROM school_events WHERE school_owner_id=$1 AND starts_at>=now() ORDER BY starts_at LIMIT 20`,[x.schoolId])).rows)});
   app.post("/api/events",async(c)=>{const x=await guard(c,"manage_announcements");if(!x)return c.json({error:"Not allowed to create school events."},403);const b=await c.req.json().catch(()=>null) as Record<string,unknown>|null;const startsAt=new Date(String(b?.startsAt||""));if(typeof b?.title!=="string"||!b.title.trim()||!Number.isFinite(startsAt.getTime())||startsAt<=new Date())return c.json({error:"Event title and a future date and time are required."},400);const r=await pool.query(`INSERT INTO school_events(school_owner_id,title,details,location,starts_at,author_user_id,author_name) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,title,details,location,starts_at AS "startsAt",author_name AS "authorName"`,[x.schoolId,b.title.trim(),String(b.details||"").trim(),String(b.location||"").trim(),startsAt.toISOString(),c.get("userId"),x.name]);return c.json(r.rows[0],201)});
   app.delete("/api/events/:id",async(c)=>{const x=await guard(c,"manage_announcements");if(!x)return c.json({error:"Not allowed to delete school events."},403);await pool.query("DELETE FROM school_events WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),x.schoolId]);return c.json({ok:true})});

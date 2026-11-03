@@ -12,6 +12,7 @@ import {
   Users,
   ClipboardList,
   FileText,
+  ChartNoAxesCombined,
   Layers,
   Megaphone,
 } from "lucide-react";
@@ -45,6 +46,7 @@ const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboar
   { title: "Teachers", url: "/teachers", icon: Users },
   { title: "Exams & marks", url: "/exams", icon: ClipboardList },
   { title: "Report cards", url: "/report-cards", icon: FileText },
+  { title: "Reports", url: "/reports", icon: ChartNoAxesCombined },
   { title: "Classes & fees", url: "/classes", icon: Layers },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
@@ -72,8 +74,8 @@ export function AppSidebar() {
   useEffect(() => { void neonApi("/api/me").then((r) => r.json()).then(setUser).catch(() => setUser(null)); }, []);
 
   const isActive = (url: string) => pathname === url;
-  const permissionFor: Record<string, string> = { "/dashboard":"view_students", "/students":"view_students", "/announcements":"view_announcements", "/fees":"view_fees", "/attendance":"view_attendance", "/teachers":"manage_staff", "/exams":"view_exams", "/report-cards":"view_exams", "/classes":"view_classes", "/settings":"manage_settings" };
-  const visibleItems = portalItems.filter((item) => user?.role === "Admin" || user?.permissions.includes(permissionFor[item.url as string]));
+  const permissionFor: Record<string, string> = { "/dashboard":"view_students", "/students":"view_students", "/announcements":"view_announcements", "/fees":"view_fees", "/attendance":"view_attendance", "/teachers":"manage_staff", "/exams":"view_exams", "/report-cards":"view_exams", "/reports":"view_students", "/classes":"view_classes", "/settings":"manage_settings" };
+  const visibleItems = portalItems.filter((item) => user?.role === "Admin" || (item.url === "/reports" ? ["view_students", "view_fees", "view_attendance", "view_exams"].some((permission) => user?.permissions.includes(permission)) : user?.permissions.includes(permissionFor[item.url as string])));
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">

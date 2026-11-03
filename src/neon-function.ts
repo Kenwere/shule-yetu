@@ -88,6 +88,37 @@ app.post("/api/notes", async (c) => {
   return c.json(result.rows[0], 201);
 });
 
+app.get("/api/school-profile", async (c) => {
+  const result = await pool.query(
+    "SELECT school_name, school_type, contact_email, phone, address, website, motto FROM school_profiles WHERE user_id = $1",
+    [c.get("userId")],
+  );
+  return c.json(result.rows[0] ?? null);
+});
+
+app.post("/api/school-profile", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Expected a JSON body." }, 400); }
+  if (typeof body !== "object" || body === null) return c.json({ error: "Invalid school profile." }, 400);
+  const input = body as Record<string, unknown>;
+  const fields = ["schoolName", "schoolType", "email", "phone", "address", "website", "motto"] as const;
+  if (fields.some((field) => typeof input[field] !== "string")) return c.json({ error: "All school profile fields must be strings." }, 400);
+  const schoolName = (input.schoolName as string).trim();
+  if (!schoolName || schoolName.length > 160) return c.json({ error: "School name must be between 1 and 160 characters." }, 400);
+  const values = fields.slice(1).map((field) => (input[field] as string).trim());
+  const limits = [80, 254, 50, 300, 300, 200];
+  if (values.some((value, index) => value.length > limits[index])) return c.json({ error: "One or more school details are too long." }, 400);
+  const result = await pool.query(
+    `INSERT INTO school_profiles (user_id, school_name, school_type, contact_email, phone, address, website, motto)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (user_id) DO UPDATE SET school_name = EXCLUDED.school_name, school_type = EXCLUDED.school_type,
+       contact_email = EXCLUDED.contact_email, phone = EXCLUDED.phone, address = EXCLUDED.address,
+       website = EXCLUDED.website, motto = EXCLUDED.motto, updated_at = now()
+     RETURNING school_name, school_type, contact_email, phone, address, website, motto`,
+    [c.get("userId"), schoolName, ...values],
+  );
+  return c.json(result.rows[0], 200);
+});
 app.post("/api/notes/live", async (c) => {
   const query = rawSql<SchoolNote>(
     "SELECT id, user_id, text, created_at FROM school_notes WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",

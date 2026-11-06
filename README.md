@@ -24,3 +24,16 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Optional teacher invitation emails
+
+Admins can always copy and share an invitation link. To send it directly, enable **Send the invitation to this email using Resend** on the staff page.
+
+Configure these values in .env.local before deploying the Neon Function:
+
+- RESEND_API_KEY: your Resend API key
+- RESEND_FROM_EMAIL: a sender address on your verified Resend domain, such as Shule Yetu <invites@your-domain.example>
+- SHULE_YETU_APP_URL: your deployed app origin, such as https://shule-yetu-two.vercel.app
+
+Verify the sender domain in Resend first. These are server-side Neon Function settings; do not prefix them with VITE_ or add the Resend API key to browser code. Deploy them with neon deploy --env .env.local. If email settings are missing or Resend rejects the message, the invitation is still created and the admin can copy the link.
+

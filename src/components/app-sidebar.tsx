@@ -1,4 +1,4 @@
-import { Link, useNavigate, useRouterState, type LinkProps } from "@tanstack/react-router";
+﻿import { Link, useNavigate, useRouterState, type LinkProps } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   CalendarCheck2,
@@ -33,9 +33,10 @@ import {
 } from "@/components/ui/sidebar";
 import { neonApi } from "@/lib/neon-api";
 import { authClient } from "@/lib/auth-client";
+import crest from "@/assets/crest.jpg";
 
 type PortalPath = NonNullable<LinkProps["to"]>;
-type PortalUser = { name: string; email: string; role: string; permissions: string[] };
+type PortalUser = { name: string; email: string; role: string; permissions: string[]; school?: { school_name?: string; logoUrl?: string } | null };
 
 const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboard }[] = [
   { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
@@ -83,17 +84,11 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip="Shule Yetu">
-              <Link to="/">
-                <div className="grid h-8 w-8 shrink-0 place-items-center bg-gold font-display text-base text-ink">
-                  SY
-                </div>
-                <div className="flex min-w-0 flex-col leading-none group-data-[collapsible=icon]:hidden">
-                  <span className="truncate font-display text-lg uppercase tracking-tight">
-                    Shule Yetu
-                  </span>
-                  <span className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60">
-                    School portal
-                  </span>
+              <Link to="/" className="flex flex-col items-center gap-2 py-2">
+                <img src={user?.school?.logoUrl || crest} alt={user?.school?.school_name ? user.school.school_name + " logo" : "Shule Yetu crest"} className="h-12 w-12 shrink-0 rounded-full bg-white object-contain p-0.5" />
+                <div className="flex min-w-0 flex-col items-center leading-none group-data-[collapsible=icon]:hidden">
+                  <span className="truncate font-display text-lg uppercase tracking-tight">Shule Yetu</span>
+                  <span className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60">School portal</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -146,10 +141,10 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              tooltip={user ? `${user.name} — ${user.role}` : "Not signed in"}
+              tooltip={user ? `${user.name} â€” ${user.role}` : "Not signed in"}
             >
               <div className="grid h-8 w-8 shrink-0 place-items-center border border-sidebar-border font-mono text-xs text-gold">
-                {user ? initials(user.name) : "–"}
+                {user ? initials(user.name) : "â€“"}
               </div>
               <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
                 <span className="truncate text-sm font-semibold">
@@ -180,3 +175,4 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+

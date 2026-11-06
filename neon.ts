@@ -1,4 +1,4 @@
-import { defineConfig } from "@neon/config/v1";
+﻿import { defineConfig } from "@neon/config/v1";
 
 export default defineConfig({
   preview: {
@@ -18,11 +18,15 @@ export default defineConfig({
         AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
         AWS_ENDPOINT_URL_S3: process.env.AWS_ENDPOINT_URL_S3,
         AWS_REGION: process.env.AWS_REGION,
+        RESEND_API_KEY: process.env.RESEND_API_KEY,
+        RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL,
+        SHULE_YETU_APP_URL: process.env.SHULE_YETU_APP_URL,
       },
     },
   },
   triggers: {
     expiredAnnouncementsCleanup: { type: "schedule", function: "hello", cron: "0 * * * *", functionPath: "/internal/cleanup-announcements" },
+    schoolTermBilling: { type: "schedule", function: "hello", cron: "0 * * * *", functionPath: "/internal/sync-school-terms" },
   },
   buckets: {
     assets: { access: "private" },
@@ -33,3 +37,4 @@ export default defineConfig({
     return {};
   },
 });
+

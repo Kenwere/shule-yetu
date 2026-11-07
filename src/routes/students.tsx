@@ -13,6 +13,7 @@ type Student = {
   class: string;
   stream: string;
   guardian: string;
+  guardianEmail: string;
   phone: string;
   address: string;
   admitted: string;
@@ -29,6 +30,7 @@ const empty: Student = {
   class: "",
   stream: "",
   guardian: "",
+  guardianEmail: "",
   phone: "",
   address: "",
   admitted: "",
@@ -275,6 +277,14 @@ function StudentsPage() {
                 className={inputCls}
                 value={form.guardian}
                 onChange={(e) => setForm({ ...form, guardian: e.target.value })}
+              />
+            </Label>
+            <Label text="Guardian email (for parent learning access)">
+              <input
+                type="email"
+                className={inputCls}
+                value={form.guardianEmail || ""}
+                onChange={(e) => setForm({ ...form, guardianEmail: e.target.value })}
               />
             </Label>
             <Label text="Guardian phone">

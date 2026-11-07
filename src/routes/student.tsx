@@ -2,6 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { inputCls } from "@/components/portal-ui";
 import { studentApi, saveStudentToken } from "@/lib/neon-api";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type Student = {
   id: string;
@@ -55,6 +64,7 @@ type Assignment = {
   allowResubmit: boolean;
   submissionId: string | null;
   responseText: string | null;
+  fileName: string | null;
   submissionStatus: string | null;
   marks: number | null;
   feedback: string | null;
@@ -87,6 +97,24 @@ type ActiveAttempt = {
   attempt: { id: string; deadline_at: string; status: string };
   questions: AttemptQuestion[];
 };
+type ReportRow = {
+  examId: string;
+  exam: string;
+  term: string;
+  academicYear: string;
+  examDate: string;
+  firstName: string;
+  lastName: string;
+  admissionNo: string;
+  className: string;
+  stream: string;
+  schoolName: string;
+  total: number;
+  average: number;
+  subjects: Record<string, number>;
+  position: number;
+  classSize: number;
+};
 
 export const Route = createFileRoute("/student")({
   head: () => ({
@@ -108,6 +136,7 @@ function StudentLearningPage() {
   const [replyBody, setReplyBody] = useState("");
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>({});
+  const [assignmentFiles, setAssignmentFiles] = useState<Record<string, File | null>>({});
   const [active, setActive] = useState<Material | null>(null);
   const [error, setError] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -116,6 +145,7 @@ function StudentLearningPage() {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [activeAttempt, setActiveAttempt] = useState<ActiveAttempt | null>(null);
   const [attemptAnswers, setAttemptAnswers] = useState<Record<string, string>>({});
+  const [reportCard, setReportCard] = useState<ReportRow[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -126,6 +156,7 @@ function StudentLearningPage() {
         discussionResponse,
         assignmentResponse,
         assessmentResponse,
+        reportResponse,
       ] = await Promise.all([
         studentApi("/api/lms/student/me"),
         studentApi("/api/lms/materials"),
@@ -133,6 +164,7 @@ function StudentLearningPage() {
         studentApi("/api/lms/discussions"),
         studentApi("/api/lms/assignments"),
         studentApi("/api/lms/assessments"),
+        studentApi("/api/lms/student/report-card"),
       ]);
       const studentData = (await studentResponse.json()) as Student;
       setStudent(studentData);
@@ -143,6 +175,7 @@ function StudentLearningPage() {
       setDiscussions((await discussionResponse.json()) as Discussion[]);
       setAssignments((await assignmentResponse.json()) as Assignment[]);
       setAssessments((await assessmentResponse.json()) as Assessment[]);
+      setReportCard((await reportResponse.json()) as ReportRow[]);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load your learning dashboard.");
@@ -166,23 +199,26 @@ function StudentLearningPage() {
     }
   }
 
-  async function saveAttemptAnswer(question: AttemptQuestion) {
-    if (!activeAttempt) return;
-    try {
-      const response = await studentApi(
-        `/api/lms/attempts/${activeAttempt.attempt.id}/answers/${question.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answer: attemptAnswers[question.id] || "" }),
-        },
-      );
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Could not save this answer.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save this answer.");
-    }
-  }
+  const saveAttemptAnswer = useCallback(
+    async (question: AttemptQuestion) => {
+      if (!activeAttempt) return;
+      try {
+        const response = await studentApi(
+          `/api/lms/attempts/${activeAttempt.attempt.id}/answers/${question.id}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answer: attemptAnswers[question.id] || "" }),
+          },
+        );
+        const result = (await response.json()) as { error?: string };
+        if (!response.ok) throw new Error(result.error || "Could not save this answer.");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not save this answer.");
+      }
+    },
+    [activeAttempt, attemptAnswers],
+  );
 
   const submitAttempt = useCallback(async () => {
     if (!activeAttempt) return;
@@ -198,7 +234,7 @@ function StudentLearningPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not submit assessment.");
     }
-  }, [activeAttempt, refresh]);
+  }, [activeAttempt, refresh, saveAttemptAnswer]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -331,16 +367,35 @@ function StudentLearningPage() {
   async function submitAssignment(event: FormEvent, assignment: Assignment) {
     event.preventDefault();
     try {
+      const responseText = assignmentDrafts[assignment.id] || assignment.responseText || "";
+      const file = assignmentFiles[assignment.id];
+      if (!responseText.trim() && !file) throw new Error("Write a response or attach a file.");
+      const form = new FormData();
+      form.set("responseText", responseText);
+      if (file) form.set("file", file);
       await studentApi(`/api/lms/assignments/${assignment.id}/submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          responseText: assignmentDrafts[assignment.id] || assignment.responseText || "",
-        }),
+        body: form,
       });
+      setAssignmentFiles((files) => ({ ...files, [assignment.id]: null }));
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not submit your work.");
+    }
+  }
+
+  async function downloadSubmission(id: string) {
+    try {
+      const response = await studentApi(`/api/lms/submissions/${id}/download`);
+      const result = (await response.json()) as { url: string; fileName: string; error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not download this submission.");
+      const link = document.createElement("a");
+      link.href = result.url;
+      link.download = result.fileName;
+      link.rel = "noreferrer";
+      link.click();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not download this submission.");
     }
   }
 
@@ -439,6 +494,96 @@ function StudentLearningPage() {
               {doneCount} / {materials.length}
             </p>
           </div>
+        </section>
+        <section className="mb-7 border border-ink/10 bg-card p-5 print:border-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="eyebrow text-ink-soft">Student report card</h2>
+              <p className="mt-1 font-display text-2xl">Approved exam performance</p>
+              <p className="mt-1 text-sm text-ink-soft">
+                {student?.firstName} {student?.lastName} · {student?.className}
+                {student?.stream ? ` / ${student.stream}` : ""} · {student?.admissionNo}
+              </p>
+            </div>
+            <button
+              className="border border-ink/20 px-3 py-2 text-xs font-bold uppercase print:hidden"
+              onClick={() => window.print()}
+            >
+              Print report card
+            </button>
+          </div>
+          {reportCard.length ? (
+            <>
+              <div
+                className="mt-5 h-64 w-full"
+                role="img"
+                aria-label="Line graph of average marks across approved exams"
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={reportCard} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#d7ddd8" />
+                    <XAxis dataKey="exam" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      formatter={(value) => [`${value}%`, "Average"]}
+                      labelFormatter={(_, payload) =>
+                        payload?.[0]?.payload
+                          ? `${payload[0].payload.term} ${payload[0].payload.academicYear}`
+                          : "Exam"
+                      }
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="average"
+                      name="Average"
+                      stroke="#14614c"
+                      strokeWidth={3}
+                      dot={{ r: 4, fill: "#d8a12c" }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-ink/15 text-xs uppercase text-ink-soft">
+                      <th className="py-2 pr-3">Exam</th>
+                      <th className="py-2 pr-3">Term / year</th>
+                      <th className="py-2 pr-3">Subject marks</th>
+                      <th className="py-2 pr-3">Average</th>
+                      <th className="py-2">Position</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportCard.map((row) => (
+                      <tr key={row.examId} className="border-b border-ink/10 align-top">
+                        <td className="py-3 pr-3 font-semibold">{row.exam}</td>
+                        <td className="py-3 pr-3">
+                          {row.term} {row.academicYear}
+                        </td>
+                        <td className="py-3 pr-3">
+                          {Object.entries(row.subjects).map(([name, score]) => (
+                            <span key={name} className="mr-3 inline-block">
+                              {name}: {score}
+                            </span>
+                          ))}
+                        </td>
+                        <td className="py-3 pr-3">{Number(row.average).toFixed(1)}%</td>
+                        <td className="py-3">
+                          {row.position} / {row.classSize}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="mt-4 text-sm text-ink-soft">
+              Your report card will appear when the school approves your exam marks.
+            </p>
+          )}
         </section>
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)]">
           <div className="border border-ink/10 bg-card p-5">
@@ -775,6 +920,15 @@ function StudentLearningPage() {
                     Teacher feedback: {assignment.feedback}
                   </p>
                 )}
+                {assignment.fileName && assignment.submissionId && (
+                  <button
+                    type="button"
+                    className="mt-2 block text-sm underline"
+                    onClick={() => void downloadSubmission(assignment.submissionId!)}
+                  >
+                    Download submitted file: {assignment.fileName}
+                  </button>
+                )}
                 <form
                   className="mt-4 space-y-3"
                   onSubmit={(event) => void submitAssignment(event, assignment)}
@@ -783,7 +937,6 @@ function StudentLearningPage() {
                     Your work
                     <textarea
                       className={inputCls}
-                      required
                       maxLength={20000}
                       rows={4}
                       value={assignmentDrafts[assignment.id] ?? assignment.responseText ?? ""}
@@ -791,6 +944,20 @@ function StudentLearningPage() {
                         setAssignmentDrafts((drafts) => ({
                           ...drafts,
                           [assignment.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    Attach work (PDF, Office, image, ZIP or text; max 20 MB)
+                    <input
+                      className={`${inputCls} mt-1`}
+                      type="file"
+                      accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.zip,.txt"
+                      onChange={(event) =>
+                        setAssignmentFiles((files) => ({
+                          ...files,
+                          [assignment.id]: event.target.files?.[0] || null,
                         }))
                       }
                     />

@@ -18,7 +18,7 @@ export function SiteHeader() {
           <span>✉ info@shuleyetu.school · ☎ School community portal</span>
           <div className="flex items-center gap-5">
             <a href="#campus">News & events</a>
-            <Link to="/login">Parent login</Link>
+            <Link to="/parent-login">Parent login</Link>
             <Link to="/register" className="bg-gold px-3 py-2 font-bold text-ink">
               Admissions open
             </Link>
@@ -60,7 +60,10 @@ export function SiteHeader() {
               </Link>
             )}
             <Link to="/login" className="hover:text-gold">
-              Login
+              Staff login
+            </Link>
+            <Link to="/parent-login" className="hidden hover:text-gold lg:inline">
+              Parent login
             </Link>
             <Link to="/register" className="bg-gold px-3 py-2 font-bold text-ink md:px-4">
               Register

@@ -19,6 +19,8 @@ import { Route as ExamsRouteImport } from './routes/exams'
 import { Route as FeesRouteImport } from './routes/fees'
 import { Route as LmsRouteImport } from './routes/lms'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ParentRouteImport } from './routes/parent'
+import { Route as ParentLoginRouteImport } from './routes/parent-login'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ReportCardsRouteImport } from './routes/report-cards'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -78,6 +80,16 @@ const LmsRoute = LmsRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ParentRoute = ParentRouteImport.update({
+  id: '/parent',
+  path: '/parent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ParentLoginRoute = ParentLoginRouteImport.update({
+  id: '/parent-login',
+  path: '/parent-login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegisterRoute = RegisterRouteImport.update({
@@ -142,6 +154,8 @@ export interface FileRoutesByFullPath {
   '/fees': typeof FeesRoute
   '/lms': typeof LmsRoute
   '/login': typeof LoginRoute
+  '/parent': typeof ParentRoute
+  '/parent-login': typeof ParentLoginRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
@@ -164,6 +178,8 @@ export interface FileRoutesByTo {
   '/fees': typeof FeesRoute
   '/lms': typeof LmsRoute
   '/login': typeof LoginRoute
+  '/parent': typeof ParentRoute
+  '/parent-login': typeof ParentLoginRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
@@ -187,6 +203,8 @@ export interface FileRoutesById {
   '/fees': typeof FeesRoute
   '/lms': typeof LmsRoute
   '/login': typeof LoginRoute
+  '/parent': typeof ParentRoute
+  '/parent-login': typeof ParentLoginRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
@@ -211,6 +229,8 @@ export interface FileRouteTypes {
     | '/fees'
     | '/lms'
     | '/login'
+    | '/parent'
+    | '/parent-login'
     | '/register'
     | '/report-cards'
     | '/reports'
@@ -233,6 +253,8 @@ export interface FileRouteTypes {
     | '/fees'
     | '/lms'
     | '/login'
+    | '/parent'
+    | '/parent-login'
     | '/register'
     | '/report-cards'
     | '/reports'
@@ -255,6 +277,8 @@ export interface FileRouteTypes {
     | '/fees'
     | '/lms'
     | '/login'
+    | '/parent'
+    | '/parent-login'
     | '/register'
     | '/report-cards'
     | '/reports'
@@ -278,6 +302,8 @@ export interface RootRouteChildren {
   FeesRoute: typeof FeesRoute
   LmsRoute: typeof LmsRoute
   LoginRoute: typeof LoginRoute
+  ParentRoute: typeof ParentRoute
+  ParentLoginRoute: typeof ParentLoginRoute
   RegisterRoute: typeof RegisterRoute
   ReportCardsRoute: typeof ReportCardsRoute
   ReportsRoute: typeof ReportsRoute
@@ -359,6 +385,20 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/parent': {
+      id: '/parent'
+      path: '/parent'
+      fullPath: '/parent'
+      preLoaderRoute: typeof ParentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/parent-login': {
+      id: '/parent-login'
+      path: '/parent-login'
+      fullPath: '/parent-login'
+      preLoaderRoute: typeof ParentLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/register': {
@@ -457,6 +497,8 @@ const rootRouteChildren: RootRouteChildren = {
   FeesRoute: FeesRoute,
   LmsRoute: LmsRoute,
   LoginRoute: LoginRoute,
+  ParentRoute: ParentRoute,
+  ParentLoginRoute: ParentLoginRoute,
   RegisterRoute: RegisterRoute,
   ReportCardsRoute: ReportCardsRoute,
   ReportsRoute: ReportsRoute,

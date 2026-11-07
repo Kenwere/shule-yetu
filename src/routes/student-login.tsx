@@ -84,6 +84,9 @@ function StudentLoginPage() {
         <a href="/login" className="mt-5 inline-block text-sm underline">
           Staff sign in
         </a>
+        <a href="/parent-login" className="ml-4 inline-block text-sm underline">
+          Parent sign in
+        </a>
       </section>
     </main>
   );

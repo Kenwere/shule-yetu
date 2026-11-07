@@ -24,6 +24,7 @@ type SchoolContext = {
   permissions: string[];
   name: string;
   studentId?: string;
+  parentId?: string;
 };
 type Permission =
   | "view_students"
@@ -138,6 +139,21 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         studentId: student.rows[0].id,
       };
     }
+    if (userId.startsWith("parent:")) {
+      const parentId = userId.slice("parent:".length);
+      const parent = await pool.query(
+        "SELECT school_owner_id,full_name FROM school_lms_parent_accounts WHERE id=$1 AND active AND session_expires_at>now()",
+        [parentId],
+      );
+      if (!parent.rowCount) return null;
+      return {
+        schoolId: parent.rows[0].school_owner_id,
+        role: "Parent",
+        permissions: ["view_lms"],
+        name: parent.rows[0].full_name || "Parent",
+        parentId,
+      };
+    }
     const owned = await pool.query(
       "SELECT user_id, school_name FROM school_profiles WHERE user_id = $1",
       [userId],
@@ -224,6 +240,11 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
   ): Promise<SchoolContext | null> {
     const context = await contextFor(c);
     if (!context) {
+      c.status(403);
+      c.header("content-type", "application/json");
+      return null;
+    }
+    if (context.role === "Parent" && !c.req.path.startsWith("/api/lms/parent/")) {
       c.status(403);
       c.header("content-type", "application/json");
       return null;
@@ -438,7 +459,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "view_students");
     if (!context) return c.json({ error: "Not allowed to view students." }, 403);
     const result = await pool.query(
-      "SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, phone, address, admitted_on AS admitted, status FROM school_students WHERE school_owner_id=$1 ORDER BY last_name,first_name",
+      'SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, guardian_email AS "guardianEmail", phone, address, admitted_on AS admitted, status FROM school_students WHERE school_owner_id=$1 ORDER BY last_name,first_name',
       [context.schoolId],
     );
     return c.json(result.rows);
@@ -475,6 +496,9 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       className,
       stream,
       b.guardian,
+      String(b.guardianEmail || "")
+        .trim()
+        .toLowerCase(),
       b.phone,
       b.address,
       b.admitted,
@@ -482,10 +506,10 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     ].map((v) => (typeof v === "string" ? v : ""));
     try {
       const result = await pool.query(
-        `INSERT INTO school_students (school_owner_id,admission_no,first_name,last_name,gender,date_of_birth,class_name,stream,guardian,phone,address,admitted_on,status)
-         VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')::date,$7,$8,$9,$10,$11,COALESCE(NULLIF($12,'')::date,CURRENT_DATE),COALESCE(NULLIF($13,''),'Active'))
-         ON CONFLICT (school_owner_id,admission_no) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,gender=EXCLUDED.gender,date_of_birth=EXCLUDED.date_of_birth,class_name=EXCLUDED.class_name,stream=EXCLUDED.stream,guardian=EXCLUDED.guardian,phone=EXCLUDED.phone,address=EXCLUDED.address,status=EXCLUDED.status
-         RETURNING id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, phone, address, admitted_on AS admitted, status`,
+        `INSERT INTO school_students (school_owner_id,admission_no,first_name,last_name,gender,date_of_birth,class_name,stream,guardian,guardian_email,phone,address,admitted_on,status)
+         VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')::date,$7,$8,$9,$10,$11,$12,COALESCE(NULLIF($13,'')::date,CURRENT_DATE),COALESCE(NULLIF($14,''),'Active'))
+         ON CONFLICT (school_owner_id,admission_no) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,gender=EXCLUDED.gender,date_of_birth=EXCLUDED.date_of_birth,class_name=EXCLUDED.class_name,stream=EXCLUDED.stream,guardian=EXCLUDED.guardian,guardian_email=EXCLUDED.guardian_email,phone=EXCLUDED.phone,address=EXCLUDED.address,status=EXCLUDED.status
+         RETURNING id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, guardian_email AS "guardianEmail", phone, address, admitted_on AS admitted, status`,
         [context.schoolId, adm, b.first.trim(), b.last.trim(), ...vals],
       );
       const student = result.rows[0];
@@ -518,7 +542,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "view_students");
     if (!context) return c.json({ error: "Not allowed to view students." }, 403);
     const student = await pool.query(
-      'SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, phone, address, admitted_on AS admitted, status, photo_key AS "photoKey" FROM school_students WHERE id=$1 AND school_owner_id=$2',
+      'SELECT id, admission_no AS adm, first_name AS first, last_name AS last, gender, date_of_birth AS dob, class_name AS class, stream, guardian, guardian_email AS "guardianEmail", phone, address, admitted_on AS admitted, status, photo_key AS "photoKey" FROM school_students WHERE id=$1 AND school_owner_id=$2',
       [c.req.param("id"), context.schoolId],
     );
     if (!student.rowCount) return c.json({ error: "Student not found." }, 404);
@@ -2056,6 +2080,8 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         (SELECT count(*) FROM school_lms_assessment_questions aq WHERE aq.assessment_id=a.id) AS "questionCount",
         (SELECT COALESCE(sum(q.marks),0) FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=a.id) AS "maxMarks",
         (SELECT count(*) FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid) AS "attemptsUsed",
+        (SELECT count(*) FROM school_lms_attempts at WHERE at.assessment_id=a.id) AS "attemptCount",
+        (SELECT count(*) FROM school_lms_attempts at JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=a.id AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL) AS "pendingReviewCount",
         CASE WHEN a.results_released AND $2='Student' THEN (SELECT at.score FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid AND at.status IN ('submitted','marked') ORDER BY at.attempt_number DESC LIMIT 1) ELSE NULL END AS "releasedScore"
        FROM school_lms_assessments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
        WHERE a.school_owner_id=$1 AND ($2='Admin' OR ($2='Student' AND a.publication_status='published' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND s.stream=a.stream OR s.id=$4::uuid AND a.stream='*' AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND cl.subjects ? a.subject)) OR ($2='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments ta WHERE ta.school_owner_id=a.school_owner_id AND ta.user_id=$3 AND ta.class_id=a.class_id AND (a.stream='*' OR ta.stream=a.stream) AND ta.subjects ? a.subject)))
@@ -2171,11 +2197,39 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       ))
     )
       return c.json({ error: "Assessment not found or outside your permissions." }, 404);
+    const unfinished=await pool.query(`SELECT count(*)::int AS count FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE a.id=$1 AND at.status='in_progress' OR a.id=$1 AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL`,[c.req.param("id")]);
+    if(Number(unfinished.rows[0]?.count||0)>0) return c.json({error:"Submit all open attempts and mark every essay and matching response before releasing results."},409);
     await pool.query(
       "UPDATE school_lms_assessments SET results_released=true WHERE id=$1 AND school_owner_id=$2",
       [c.req.param("id"), context.schoolId],
     );
     return c.json({ released: true });
+  });
+
+  app.get("/api/lms/assessments/:id/attempts", async (c) => {
+    const context=await guard(c,"manage_lms");
+    if(!context) return c.json({error:"Not allowed to review assessment attempts."},403);
+    const assessment=await pool.query("SELECT class_id,subject,stream FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),context.schoolId]);
+    if(!assessment.rowCount || !(await canManageLearning(context,c.get("userId"),assessment.rows[0].class_id,assessment.rows[0].subject,assessment.rows[0].stream))) return c.json({error:"Assessment not found or outside your permissions."},404);
+    const rows=await pool.query(`SELECT at.id,at.attempt_number AS "attemptNumber",at.status,at.score,at.submitted_at AS "submittedAt",s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",q.id AS "questionId",q.question_type AS type,q.prompt,q.answer_key AS "answerKey",q.explanation,q.marks,aa.answer,aa.marks_awarded AS "marksAwarded",aa.feedback FROM school_lms_attempts at JOIN school_students s ON s.id=at.student_id AND s.school_owner_id=at.school_owner_id LEFT JOIN school_lms_assessment_questions aq ON aq.assessment_id=at.assessment_id LEFT JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=$1 AND at.school_owner_id=$2 ORDER BY at.submitted_at DESC NULLS LAST,s.last_name,s.first_name,aq.position`,[c.req.param("id"),context.schoolId]);
+    const attempts=new Map<string,Record<string,unknown>>();
+    for(const row of rows.rows){let attempt=attempts.get(row.id);if(!attempt){attempt={id:row.id,attemptNumber:row.attemptNumber,status:row.status,score:row.score,submittedAt:row.submittedAt,admissionNo:row.admissionNo,studentName:`${row.firstName} ${row.lastName}`,questions:[]};attempts.set(row.id,attempt);} if(row.questionId)(attempt.questions as Record<string,unknown>[]).push({id:row.questionId,type:row.type,prompt:row.prompt,answer:row.answer,answerKey:row.answerKey,explanation:row.explanation,marks:row.marks,marksAwarded:row.marksAwarded,feedback:row.feedback});}
+    return c.json([...attempts.values()]);
+  });
+
+  app.post("/api/lms/attempts/:attemptId/answers/:questionId/mark", async (c) => {
+    const context=await guard(c,"manage_lms");
+    if(!context) return c.json({error:"Not allowed to mark assessment answers."},403);
+    const match=await pool.query(`SELECT at.id,at.assessment_id,a.class_id,a.subject,a.stream,q.marks,q.question_type FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id AND a.school_owner_id=at.school_owner_id JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id AND aq.question_id=$3 JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE at.id=$1 AND at.school_owner_id=$2 AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching')`,[c.req.param("attemptId"),context.schoolId,c.req.param("questionId")]);
+    if(!match.rowCount || !(await canManageLearning(context,c.get("userId"),match.rows[0].class_id,match.rows[0].subject,match.rows[0].stream))) return c.json({error:"Submitted answer not found or outside your permissions."},404);
+    const body=(await c.req.json().catch(()=>null)) as Record<string,unknown>|null, marks=Number(body?.marks), feedback=String(body?.feedback||"").trim();
+    if(!Number.isFinite(marks)||marks<0||marks>Number(match.rows[0].marks)||feedback.length>5000) return c.json({error:"Enter marks from zero to the question maximum and feedback up to 5000 characters."},400);
+    const client=await pool.connect();
+    try{await client.query("BEGIN"); await client.query(`INSERT INTO school_lms_attempt_answers(attempt_id,question_id,answer,marks_awarded,feedback) VALUES($1,$2,'null'::jsonb,$3,$4) ON CONFLICT(attempt_id,question_id) DO UPDATE SET marks_awarded=EXCLUDED.marks_awarded,feedback=EXCLUDED.feedback,updated_at=now()`,[match.rows[0].id,c.req.param("questionId"),marks,feedback]);
+      const pending=await client.query(`SELECT count(*)::int AS n FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=$1 AND aa.question_id=q.id WHERE aq.assessment_id=$2 AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL`,[match.rows[0].id,match.rows[0].assessment_id]);
+      await client.query(`UPDATE school_lms_attempts SET score=(SELECT COALESCE(sum(marks_awarded),0) FROM school_lms_attempt_answers WHERE attempt_id=$1),status=CASE WHEN $2::int=0 THEN 'marked' ELSE 'submitted' END,marked_by=CASE WHEN $2::int=0 THEN $3 ELSE NULL END,marked_at=CASE WHEN $2::int=0 THEN now() ELSE NULL END WHERE id=$1`,[match.rows[0].id,pending.rows[0].n,c.get("userId")]);
+      await client.query("COMMIT"); return c.json({saved:true,fullyMarked:Number(pending.rows[0].n)===0});
+    }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
   });
 
   app.post("/api/lms/assessments/:id/start", async (c) => {
@@ -2304,6 +2358,10 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         );
       }
       await client.query(
+        `INSERT INTO school_lms_attempt_answers(attempt_id,question_id,answer) SELECT $1,aq.question_id,'null'::jsonb FROM school_lms_assessment_questions aq WHERE aq.assessment_id=$2 ON CONFLICT(attempt_id,question_id) DO NOTHING`,
+        [a.rows[0].id,a.rows[0].assessment_id],
+      );
+      await client.query(
         `UPDATE school_lms_attempt_answers aa SET marks_awarded=CASE WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') AND lower(btrim(COALESCE(aa.answer#>>'{}',''))) = lower(btrim(COALESCE(q.answer_key#>>'{}',''))) THEN q.marks WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') THEN 0 ELSE NULL END FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=$1 AND aa.attempt_id=$2 AND aa.question_id=q.id`,
         [a.rows[0].assessment_id, a.rows[0].id],
       );
@@ -2380,6 +2438,186 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         stream: student.stream,
       },
     });
+  });
+
+  app.post("/api/lms/parent/auth/login", async (c) => {
+    const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const email = String(b?.email || "")
+        .trim()
+        .toLowerCase(),
+      password = String(b?.password || ""),
+      school = String(b?.schoolName || "").trim();
+    if (!email || !password)
+      return c.json({ error: "Parent email and password are required." }, 400);
+    const rows = await pool.query(
+      `SELECT a.*,p.school_name FROM school_lms_parent_accounts a JOIN school_profiles p ON p.user_id=a.school_owner_id WHERE a.email=$1 AND a.active AND ($2='' OR lower(p.school_name)=lower($2)) LIMIT 2`,
+      [email, school],
+    );
+    if (rows.rowCount !== 1)
+      return c.json(
+        {
+          error: rows.rowCount
+            ? "More than one school has a parent account for this email. Enter the school name."
+            : "Email or password is incorrect.",
+        },
+        401,
+      );
+    const account = rows.rows[0];
+    if (account.locked_until && new Date(account.locked_until) > new Date())
+      return c.json(
+        { error: "Too many failed attempts. Ask your school to reset parent access." },
+        429,
+      );
+    if (!(await verifyStudentPassword(password, account.password_hash))) {
+      await pool.query(
+        "UPDATE school_lms_parent_accounts SET failed_login_count=failed_login_count+1,locked_until=CASE WHEN failed_login_count+1>=5 THEN now()+interval '15 minutes' ELSE locked_until END WHERE id=$1",
+        [account.id],
+      );
+      return c.json({ error: "Email or password is incorrect." }, 401);
+    }
+    const token = randomBytes(32).toString("base64url");
+    await pool.query(
+      "UPDATE school_lms_parent_accounts SET session_hash=$2,session_expires_at=now()+interval '24 hours',failed_login_count=0,locked_until=NULL,updated_at=now() WHERE id=$1",
+      [account.id, hashToken(token)],
+    );
+    return c.json({
+      token: `par.${token}`,
+      mustChangePassword: account.must_change_password,
+      parent: { name: account.full_name, email: account.email, schoolName: account.school_name },
+    });
+  });
+
+  app.post("/api/lms/parent/auth/change-password", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.parentId) return c.json({ error: "Parent account required." }, 403);
+    const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const current = String(b?.currentPassword || ""),
+      next = String(b?.newPassword || "");
+    if (next.length < 10 || next.length > 128)
+      return c.json({ error: "New password must be 10 to 128 characters." }, 400);
+    const row = await pool.query(
+      "SELECT password_hash FROM school_lms_parent_accounts WHERE id=$1 AND school_owner_id=$2",
+      [context.parentId, context.schoolId],
+    );
+    if (!row.rowCount || !(await verifyStudentPassword(current, row.rows[0].password_hash)))
+      return c.json({ error: "Current password is incorrect." }, 401);
+    await pool.query(
+      "UPDATE school_lms_parent_accounts SET password_hash=$2,must_change_password=false,updated_at=now() WHERE id=$1",
+      [context.parentId, await hashStudentPassword(next)],
+    );
+    return c.json({ updated: true });
+  });
+
+  app.get("/api/lms/parent/me", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.parentId) return c.json({ error: "Parent account required." }, 403);
+    const result = await pool.query(
+      'SELECT email,full_name AS name,must_change_password AS "mustChangePassword" FROM school_lms_parent_accounts WHERE id=$1 AND school_owner_id=$2',
+      [context.parentId, context.schoolId],
+    );
+    return result.rowCount
+      ? c.json(result.rows[0])
+      : c.json({ error: "Parent account not found." }, 404);
+  });
+
+  app.post("/api/lms/parent/auth/logout", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.parentId) return c.json({ error: "Parent account required." }, 403);
+    await pool.query(
+      "UPDATE school_lms_parent_accounts SET session_hash=NULL,session_expires_at=NULL WHERE id=$1",
+      [context.parentId],
+    );
+    return c.json({ loggedOut: true });
+  });
+
+  app.get("/api/lms/parent/progress", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.parentId || context.role !== "Parent")
+      return c.json({ error: "Parent account required." }, 403);
+    const students = await pool.query(
+      `SELECT s.id,s.first_name AS "firstName",s.last_name AS "lastName",s.admission_no AS "admissionNo",s.class_name AS "className",s.stream FROM school_lms_parent_students ps JOIN school_students s ON s.id=ps.student_id AND s.school_owner_id=ps.school_owner_id JOIN school_lms_parent_accounts pa ON pa.id=ps.parent_id AND pa.school_owner_id=ps.school_owner_id WHERE ps.parent_id=$1 AND ps.school_owner_id=$2 AND s.status='Active' AND lower(s.guardian_email)=pa.email ORDER BY s.last_name,s.first_name`,
+      [context.parentId, context.schoolId],
+    );
+    const ids = students.rows.map((row) => row.id);
+    const activity = await pool.query(
+      `SELECT s.id AS "studentId",count(m.id)::int AS "materialsAvailable",count(pr.completed_at)::int AS "materialsCompleted",COALESCE(sum(pr.seconds_viewed),0)::int AS "secondsViewed",COALESCE(sum(pr.download_count),0)::int AS "downloads" FROM school_students s LEFT JOIN school_classes cl ON cl.school_owner_id=s.school_owner_id AND cl.name=s.class_name LEFT JOIN school_lms_materials m ON m.school_owner_id=s.school_owner_id AND m.class_id=cl.id AND m.publication_status='published' AND (m.stream='*' OR m.stream=s.stream) AND cl.subjects ? m.subject LEFT JOIN school_lms_progress pr ON pr.student_id=s.id AND pr.material_id=m.id WHERE s.id=ANY($1::uuid[]) AND s.school_owner_id=$2 GROUP BY s.id`,
+      [ids, context.schoolId],
+    );
+    const assignments = await pool.query(
+      `SELECT sub.student_id AS "studentId",a.title,a.subject,a.due_at AS "dueAt",sub.status,sub.marks,sub.feedback,sub.submitted_at AS "submittedAt" FROM school_lms_submissions sub JOIN school_lms_assignments a ON a.id=sub.assignment_id AND a.school_owner_id=sub.school_owner_id WHERE sub.school_owner_id=$1 AND sub.student_id=ANY($2::uuid[]) ORDER BY sub.submitted_at DESC LIMIT 300`,
+      [context.schoolId, ids],
+    );
+    const exams = await pool.query(
+      `SELECT m.student_id AS "studentId",e.name AS exam,e.term,e.academic_year AS "academicYear",m.subject,m.score FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.school_owner_id=$1 AND m.student_id=ANY($2::uuid[]) AND m.status='Approved' ORDER BY e.created_at DESC,m.subject`,
+      [context.schoolId, ids],
+    );
+    const assessments = await pool.query(
+      `SELECT at.student_id AS "studentId",a.title,a.subject,at.score,(SELECT COALESCE(sum(q.marks),0) FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=a.id) AS "maxMarks",at.submitted_at AS "submittedAt" FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id AND a.school_owner_id=at.school_owner_id WHERE at.school_owner_id=$1 AND at.student_id=ANY($2::uuid[]) AND a.results_released AND at.status IN ('submitted','marked') ORDER BY at.submitted_at DESC`,
+      [context.schoolId, ids],
+    );
+    return c.json({
+      students: students.rows.map((student) => ({
+        ...student,
+        activity: activity.rows.find((row) => row.studentId === student.id) || {
+          materialsAvailable: 0,
+          materialsCompleted: 0,
+          secondsViewed: 0,
+          downloads: 0,
+        },
+        assignments: assignments.rows.filter((row) => row.studentId === student.id),
+        exams: exams.rows.filter((row) => row.studentId === student.id),
+        assessments: assessments.rows.filter((row) => row.studentId === student.id),
+      })),
+    });
+  });
+
+  app.post("/api/lms/parent-accounts/generate", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context || context.role !== "Admin")
+      return c.json({ error: "Only the school administrator can create parent access." }, 403);
+    const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const email = String(b?.email || "")
+      .trim()
+      .toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return c.json({ error: "Enter a valid guardian email." }, 400);
+    const linked = await pool.query(
+      `SELECT id,first_name AS "firstName",last_name AS "lastName",class_name AS "className" FROM school_students WHERE school_owner_id=$1 AND status='Active' AND lower(guardian_email)=$2 ORDER BY last_name,first_name`,
+      [context.schoolId, email],
+    );
+    if (!linked.rowCount)
+      return c.json(
+        { error: "No active student has this guardian email. Add it to the student record first." },
+        404,
+      );
+    const temp = randomBytes(12).toString("base64url"),
+      hash = await hashStudentPassword(temp),
+      name = String(b?.name || "")
+        .trim()
+        .slice(0, 180);
+    const client = await pool.connect();
+    let parentId = "";
+    try {
+      await client.query("BEGIN");
+      const account = await client.query(
+        `INSERT INTO school_lms_parent_accounts(school_owner_id,email,full_name,password_hash) VALUES($1,$2,$3,$4) ON CONFLICT(school_owner_id,email) DO UPDATE SET full_name=EXCLUDED.full_name,password_hash=EXCLUDED.password_hash,active=true,must_change_password=true,session_hash=NULL,session_expires_at=NULL,failed_login_count=0,locked_until=NULL,updated_at=now() RETURNING id`,
+        [context.schoolId, email, name, hash],
+      );
+      parentId = account.rows[0].id;
+      await client.query("DELETE FROM school_lms_parent_students WHERE parent_id=$1", [parentId]);
+      for (const student of linked.rows)
+        await client.query(
+          "INSERT INTO school_lms_parent_students(parent_id,school_owner_id,student_id) VALUES($1,$2,$3)",
+          [parentId, context.schoolId, student.id],
+        );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return c.json({ email, temporaryPassword: temp, students: linked.rows }, 201);
   });
 
   app.get("/api/lms/accounts", async (c) => {
@@ -2520,6 +2758,26 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       : c.json({ error: "Student record not found." }, 404);
   });
 
+  app.get("/api/lms/student/report-card", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const result = await pool.query(
+      `WITH cohort_scores AS (
+      SELECT e.id AS "examId",e.name AS exam,e.term,e.academic_year AS "academicYear",e.created_at AS "examDate",s.id AS "studentId",s.first_name AS "firstName",s.last_name AS "lastName",s.admission_no AS "admissionNo",s.class_name AS "className",s.stream,p.school_name AS "schoolName",COALESCE(sum(m.score),0)::numeric AS total,COALESCE(round(avg(m.score),1),0)::numeric AS average,COALESCE(jsonb_object_agg(m.subject,m.score) FILTER(WHERE m.id IS NOT NULL),'{}'::jsonb) AS subjects,count(m.id)::int AS "subjectCount"
+      FROM school_students selected JOIN school_students s ON s.school_owner_id=selected.school_owner_id AND s.class_name=selected.class_name AND s.status='Active'
+      JOIN school_exams e ON e.school_owner_id=s.school_owner_id AND e.class_name=s.class_name AND (e.stream='*' OR e.stream=s.stream)
+      JOIN school_profiles p ON p.user_id=s.school_owner_id
+      LEFT JOIN school_marks m ON m.exam_id=e.id AND m.student_id=s.id AND m.status='Approved'
+      WHERE selected.id=$1 AND selected.school_owner_id=$2 AND selected.status='Active'
+      GROUP BY e.id,s.id,p.school_name
+    ), ranked AS (SELECT *,DENSE_RANK() OVER(PARTITION BY "examId" ORDER BY total DESC) AS position,COUNT(*) OVER(PARTITION BY "examId") AS "classSize" FROM cohort_scores)
+    SELECT "examId",exam,term,"academicYear","examDate","firstName","lastName","admissionNo","className",stream,"schoolName",total,average,subjects,position,"classSize" FROM ranked WHERE "studentId"=$1 AND "subjectCount">0 ORDER BY "examDate","examId"`,
+      [context.studentId, context.schoolId],
+    );
+    return c.json(result.rows);
+  });
+
   app.post("/api/lms/materials/:id/activity", async (c) => {
     const context = await guard(c, "view_lms");
     if (!context?.studentId || context.role !== "Student")
@@ -2566,7 +2824,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       `SELECT a.id,a.class_id AS "classId",cl.name AS "className",a.subject,a.stream,a.topic_id AS "topicId",t.title AS topic,
         a.title,a.instructions,a.term,a.academic_year AS "academicYear",a.due_at AS "dueAt",a.max_marks AS "maxMarks",a.allow_late AS "allowLate",a.allow_resubmit AS "allowResubmit",
         a.publication_status AS status,a.created_by_name AS "createdByName",a.created_at AS "createdAt",
-        sub.id AS "submissionId",sub.response_text AS "responseText",sub.status AS "submissionStatus",sub.marks,sub.feedback,sub.submitted_at AS "submittedAt"
+        sub.id AS "submissionId",sub.response_text AS "responseText",sub.file_name AS "fileName",sub.status AS "submissionStatus",sub.marks,sub.feedback,sub.submitted_at AS "submittedAt"
        FROM school_lms_assignments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
        LEFT JOIN school_lms_topics t ON t.id=a.topic_id AND t.school_owner_id=a.school_owner_id
        LEFT JOIN school_lms_submissions sub ON sub.assignment_id=a.id AND sub.student_id=$4::uuid
@@ -2646,10 +2904,40 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "view_lms");
     if (!context?.studentId || context.role !== "Student")
       return c.json({ error: "Student account required." }, 403);
-    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-    const responseText = String(body?.responseText || "").trim();
-    if (!responseText || responseText.length > 20000)
-      return c.json({ error: "Assignment response must contain 1 to 20000 characters." }, 400);
+    const form = await c.req.formData().catch(() => null);
+    if (!form) return c.json({ error: "Submit your assignment as a form." }, 400);
+    const responseText = String(form.get("responseText") || "").trim();
+    const upload = form.get("file");
+    const file = upload instanceof File && upload.size > 0 ? upload : null;
+    if (responseText.length > 20000 || (!responseText && !file))
+      return c.json(
+        { error: "Add written work (up to 20000 characters), an attachment, or both." },
+        400,
+      );
+    if (file && file.size > 20 * 1024 * 1024)
+      return c.json({ error: "Assignment files are limited to 20 MB." }, 413);
+    const allowedTypes: Record<string, string[]> = {
+      pdf: ["application/pdf"],
+      doc: ["application/msword"],
+      docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      ppt: ["application/vnd.ms-powerpoint"],
+      pptx: ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+      xls: ["application/vnd.ms-excel"],
+      xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+      jpg: ["image/jpeg"],
+      jpeg: ["image/jpeg"],
+      png: ["image/png"],
+      webp: ["image/webp"],
+      txt: ["text/plain"],
+      zip: ["application/zip", "application/x-zip-compressed"],
+    };
+    const extension = file?.name.split(".").pop()?.toLowerCase() || "";
+    const mimeType = file?.type.toLowerCase() || "";
+    if (file && !allowedTypes[extension]?.includes(mimeType))
+      return c.json(
+        { error: "Attach a PDF, Office document, JPG/PNG/WEBP, ZIP, or text file." },
+        415,
+      );
     const assignment = await pool.query(
       `SELECT a.id,a.allow_late,a.allow_resubmit,a.due_at FROM school_lms_assignments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
        JOIN school_students s ON s.id=$2 AND s.school_owner_id=a.school_owner_id AND s.class_name=cl.name AND s.status='Active' AND (a.stream='*' OR a.stream=s.stream) AND cl.subjects ? a.subject
@@ -2664,25 +2952,90 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       !assignment.rows[0].allow_late
     )
       return c.json({ error: "The due date has passed." }, 409);
-    const result = await pool.query(
-      `INSERT INTO school_lms_submissions(school_owner_id,assignment_id,student_id,response_text,status)
-       VALUES($1,$2,$3,$4,'submitted') ON CONFLICT(assignment_id,student_id) DO UPDATE
-       SET response_text=EXCLUDED.response_text,status='submitted',marks=NULL,feedback='',submitted_at=now(),marked_by=NULL,marked_at=NULL
-       WHERE $5::boolean RETURNING id,status,submitted_at AS "submittedAt"`,
-      [
-        context.schoolId,
-        c.req.param("id"),
-        context.studentId,
-        responseText,
-        assignment.rows[0].allow_resubmit,
-      ],
+    const prior = await pool.query(
+      "SELECT id,file_key,file_name FROM school_lms_submissions WHERE assignment_id=$1 AND student_id=$2",
+      [c.req.param("id"), context.studentId],
     );
+    if (prior.rowCount && !assignment.rows[0].allow_resubmit)
+      return c.json(
+        { error: "This assignment has already been submitted and resubmission is disabled." },
+        409,
+      );
+    let key = prior.rows[0]?.file_key || "";
+    if (file) {
+      key = `learning-submissions/${context.schoolId}/${c.req.param("id")}/${randomUUID()}.${extension}`;
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: imageBucket,
+          Key: key,
+          Body: new Uint8Array(await file.arrayBuffer()),
+          ContentType: mimeType,
+        }),
+      );
+    }
+    let result;
+    try {
+      result = await pool.query(
+        `INSERT INTO school_lms_submissions(school_owner_id,assignment_id,student_id,response_text,file_key,file_name,status)
+         VALUES($1,$2,$3,$4,$5,$6,'submitted') ON CONFLICT(assignment_id,student_id) DO UPDATE
+         SET response_text=EXCLUDED.response_text,file_key=EXCLUDED.file_key,file_name=EXCLUDED.file_name,status='submitted',marks=NULL,feedback='',submitted_at=now(),marked_by=NULL,marked_at=NULL
+         WHERE $7::boolean RETURNING id,status,submitted_at AS "submittedAt"`,
+        [
+          context.schoolId,
+          c.req.param("id"),
+          context.studentId,
+          responseText,
+          key,
+          file?.name.slice(0, 255) || prior.rows[0]?.file_name || "",
+          assignment.rows[0].allow_resubmit || !prior.rowCount,
+        ],
+      );
+    } catch (error) {
+      if (file)
+        await s3
+          .send(new DeleteObjectCommand({ Bucket: imageBucket, Key: key }))
+          .catch(() => undefined);
+      throw error;
+    }
     if (!result.rowCount)
       return c.json(
         { error: "This assignment has already been submitted and resubmission is disabled." },
         409,
       );
+    if (file && prior.rows[0]?.file_key && prior.rows[0].file_key !== key)
+      await s3
+        .send(new DeleteObjectCommand({ Bucket: imageBucket, Key: prior.rows[0].file_key }))
+        .catch((error) => console.error("Could not remove replaced assignment submission", error));
     return c.json(result.rows[0], 201);
+  });
+
+  app.get("/api/lms/submissions/:id/download", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to access this submission." }, 403);
+    const row = await pool.query(
+      `SELECT sub.file_key,sub.file_name,a.class_id,a.subject,a.stream,sub.student_id FROM school_lms_submissions sub JOIN school_lms_assignments a ON a.id=sub.assignment_id AND a.school_owner_id=sub.school_owner_id WHERE sub.id=$1 AND sub.school_owner_id=$2 AND sub.file_key<>''`,
+      [c.req.param("id"), context.schoolId],
+    );
+    if (!row.rowCount) return c.json({ error: "Submission file not found." }, 404);
+    if (context.role === "Student" && row.rows[0].student_id !== context.studentId)
+      return c.json({ error: "Submission file not found." }, 404);
+    if (
+      context.role === "Teacher" &&
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        row.rows[0].class_id,
+        row.rows[0].subject,
+        row.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Submission file not found." }, 404);
+    const url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: imageBucket, Key: row.rows[0].file_key }),
+      { expiresIn: 300 },
+    );
+    return c.json({ url, fileName: row.rows[0].file_name });
   });
 
   app.get("/api/lms/assignments/:id/submissions", async (c) => {
@@ -2704,7 +3057,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     )
       return c.json({ error: "Assignment not found or outside your permissions." }, 404);
     const result = await pool.query(
-      `SELECT sub.id,sub.student_id AS "studentId",s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",sub.response_text AS "responseText",sub.status,sub.marks,sub.feedback,sub.submitted_at AS "submittedAt"
+      `SELECT sub.id,sub.student_id AS "studentId",s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",sub.response_text AS "responseText",sub.file_name AS "fileName",sub.status,sub.marks,sub.feedback,sub.submitted_at AS "submittedAt"
        FROM school_lms_submissions sub JOIN school_students s ON s.id=sub.student_id AND s.school_owner_id=sub.school_owner_id
        WHERE sub.school_owner_id=$1 AND sub.assignment_id=$2 ORDER BY s.last_name,s.first_name`,
       [context.schoolId, c.req.param("id")],

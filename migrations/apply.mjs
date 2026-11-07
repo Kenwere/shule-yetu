@@ -19,6 +19,7 @@ const migrations = [
   "0013_lms_core.sql",
   "0014_lms_student_accounts.sql",
   "0015_lms_assessments.sql",
+  "0016_lms_parent_access.sql",
 ];
 const pool = new Pool({ connectionString, max: 1 });
 try {

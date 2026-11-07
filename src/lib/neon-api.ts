@@ -2,6 +2,7 @@ import { authClient } from "./auth-client";
 
 const apiBase = import.meta.env.VITE_NEON_FUNCTION_HELLO_URL;
 const studentSessionKey = "shule-yetu-student-session";
+const parentSessionKey = "shule-yetu-parent-session";
 
 function getStudentToken() {
   return typeof window === "undefined"
@@ -13,6 +14,54 @@ export function saveStudentToken(token: string | null) {
   if (typeof window === "undefined") return;
   if (token) window.sessionStorage.setItem(studentSessionKey, token);
   else window.sessionStorage.removeItem(studentSessionKey);
+}
+
+function getParentToken() {
+  return typeof window === "undefined" ? "" : window.sessionStorage.getItem(parentSessionKey) || "";
+}
+export function saveParentToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) window.sessionStorage.setItem(parentSessionKey, token);
+  else window.sessionStorage.removeItem(parentSessionKey);
+}
+export async function parentLogin(email: string, password: string, schoolName = "") {
+  if (!apiBase) throw new Error("Neon Functions URL is not configured.");
+  const base = apiBase.endsWith("/") ? apiBase : `${apiBase}/`;
+  const response = await fetch(new URL("api/lms/parent/auth/login", base), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, schoolName }),
+  });
+  const result = (await response.json()) as {
+    token?: string;
+    error?: string;
+    mustChangePassword?: boolean;
+  };
+  if (!response.ok || !result.token) throw new Error(result.error || "Parent login failed.");
+  saveParentToken(result.token);
+  return result;
+}
+export async function parentApi(path: string, init: RequestInit = {}) {
+  if (!apiBase) throw new Error("Neon Functions URL is not configured.");
+  const token = getParentToken();
+  if (!token) throw new Error("Please sign in with your parent account.");
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const url = new URL(path.replace(/^\//, ""), apiBase.endsWith("/") ? apiBase : `${apiBase}/`);
+  const response = await fetch(url, { ...init, headers });
+  if (!response.ok) {
+    const raw = await response.text();
+    let detail = raw;
+    try {
+      const body = JSON.parse(raw) as { error?: unknown; message?: unknown };
+      if (typeof body.error === "string") detail = body.error;
+      else if (typeof body.message === "string") detail = body.message;
+    } catch {
+      // Keep the server's plain-text error.
+    }
+    throw new Error(detail || `Neon API returned ${response.status}.`);
+  }
+  return response;
 }
 
 export async function studentLogin(admissionNo: string, password: string, schoolName = "") {

@@ -74,8 +74,21 @@ async function requireUser(
 }
 
 app.use("/api/*", async (c, next) => {
-  if (c.req.path === "/api/lms/auth/login") return await next();
+  if (c.req.path === "/api/lms/auth/login" || c.req.path === "/api/lms/parent/auth/login")
+    return await next();
   const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (bearer.startsWith("par.")) {
+    const sessionHash = createHash("sha256").update(bearer.slice(4)).digest("hex");
+    const account = await pool.query(
+      "SELECT id,email,full_name FROM school_lms_parent_accounts WHERE session_hash=$1 AND active AND session_expires_at>now()",
+      [sessionHash],
+    );
+    if (!account.rowCount) return c.json({ error: "Parent session expired. Sign in again." }, 401);
+    c.set("userId", `parent:${account.rows[0].id}`);
+    c.set("userEmail", account.rows[0].email);
+    c.set("userName", account.rows[0].full_name || "Parent");
+    return await next();
+  }
   if (bearer.startsWith("stu.")) {
     const sessionHash = createHash("sha256").update(bearer.slice(4)).digest("hex");
     const account = await pool.query(

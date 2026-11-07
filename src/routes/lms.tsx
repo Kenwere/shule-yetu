@@ -64,7 +64,11 @@ type Assessment = {
   status: string;
   questionCount: number;
   maxMarks: number;
+  attemptCount: number;
+  pendingReviewCount: number;
 };
+type AssessmentReviewQuestion = { id:string; type:string; prompt:string; answer:unknown; answerKey:unknown; explanation:string; marks:number; marksAwarded:number|null; feedback:string };
+type AssessmentAttempt = { id:string; attemptNumber:number; status:string; score:number|null; submittedAt:string|null; admissionNo:string; studentName:string; questions:AssessmentReviewQuestion[] };
 type Discussion = {
   id: string;
   className: string;
@@ -99,6 +103,7 @@ type Submission = {
   firstName: string;
   lastName: string;
   responseText: string;
+  fileName: string;
   status: string;
   marks: number | null;
   feedback: string;
@@ -136,6 +141,13 @@ function LearningPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentName, setParentName] = useState("");
+  const [parentCredential, setParentCredential] = useState<{
+    email: string;
+    temporaryPassword: string;
+    students: { firstName: string; lastName: string; className: string }[];
+  } | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [selectedQuestions, setSelectedQuestions] = useState<string[]>([]);
@@ -146,6 +158,10 @@ function LearningPage() {
   const [assessmentStart, setAssessmentStart] = useState("");
   const [assessmentEnd, setAssessmentEnd] = useState("");
   const [assessmentStatus, setAssessmentStatus] = useState<"draft" | "published">("draft");
+  const [activeReviewAssessment, setActiveReviewAssessment] = useState<Assessment | null>(null);
+  const [reviewAttempts, setReviewAttempts] = useState<AssessmentAttempt[]>([]);
+  const [reviewMarks, setReviewMarks] = useState<Record<string,string>>({});
+  const [reviewFeedback, setReviewFeedback] = useState<Record<string,string>>({});
   const [questionType, setQuestionType] = useState("multiple_choice");
   const [questionPrompt, setQuestionPrompt] = useState("");
   const [questionOptions, setQuestionOptions] = useState("");
@@ -329,6 +345,33 @@ function LearningPage() {
       setBusy(false);
     }
   }
+  async function generateParentAccess(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setParentCredential(null);
+    try {
+      const response = await neonApi("/api/lms/parent-accounts/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: parentEmail, name: parentName }),
+      });
+      setParentCredential(
+        (await response.json()) as {
+          email: string;
+          temporaryPassword: string;
+          students: { firstName: string; lastName: string; className: string }[];
+        },
+      );
+      setFlash(
+        "Parent account is ready. Share the temporary password securely; it is shown only once.",
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create parent account.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function createQuestion(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -403,6 +446,17 @@ function LearningPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not release results.");
     }
+  }
+  async function openAssessmentAttempts(item: Assessment) {
+    try { const response=await neonApi(`/api/lms/assessments/${item.id}/attempts`); setReviewAttempts((await response.json()) as AssessmentAttempt[]); setActiveReviewAssessment(item); }
+    catch(cause){setError(cause instanceof Error?cause.message:"Could not load assessment attempts.");}
+  }
+  async function saveAssessmentMark(attempt:AssessmentAttempt, question:AssessmentReviewQuestion) {
+    try {
+      await neonApi(`/api/lms/attempts/${attempt.id}/answers/${question.id}/mark`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({marks:Number(reviewMarks[`${attempt.id}:${question.id}`] ?? question.marksAwarded ?? 0),feedback:reviewFeedback[`${attempt.id}:${question.id}`] ?? question.feedback ?? ""})});
+      if(activeReviewAssessment) await openAssessmentAttempts(activeReviewAssessment);
+      await load();
+    } catch(cause){setError(cause instanceof Error?cause.message:"Could not save question marks.");}
   }
   async function openDiscussion(item: Discussion) {
     try {
@@ -483,6 +537,20 @@ function LearningPage() {
       await openSubmissions(activeAssignment);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the mark.");
+    }
+  }
+  async function downloadSubmission(item: Submission) {
+    try {
+      const response = await neonApi(`/api/lms/submissions/${item.id}/download`);
+      const result = (await response.json()) as { url: string; fileName: string; error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not download submitted work.");
+      const link = document.createElement("a");
+      link.href = result.url;
+      link.download = result.fileName;
+      link.rel = "noreferrer";
+      link.click();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not download submitted work.");
     }
   }
   function downloadCredentials() {
@@ -1048,6 +1116,14 @@ function LearningPage() {
                       {item.firstName} {item.lastName} · {item.admissionNo}
                     </p>
                     <p className="my-2 whitespace-pre-wrap text-sm">{item.responseText}</p>
+                    {item.fileName && (
+                      <button
+                        className="text-sm underline"
+                        onClick={() => void downloadSubmission(item)}
+                      >
+                        Download {item.fileName}
+                      </button>
+                    )}
                     <p className="text-xs text-ink-soft">{item.status}</p>
                     <div className="mt-3 grid gap-2 sm:grid-cols-[100px_1fr_auto]">
                       <input
@@ -1222,6 +1298,55 @@ function LearningPage() {
       </section>
       {isAdmin && (
         <section className="mt-7 border border-ink/10 bg-card p-5">
+          <div className="mb-6 border-b border-ink/10 pb-5">
+            <h2 className="eyebrow text-ink-soft">Parent learning access</h2>
+            <p className="mt-2 max-w-2xl text-sm text-ink-soft">
+              Add a guardian email to each linked student record first. Parent accounts can view
+              learning activity and assignments for every active child at that email, plus approved
+              school exam scores and released online quiz results.
+            </p>
+            <form
+              className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+              onSubmit={(event) => void generateParentAccess(event)}
+            >
+              <input
+                className={inputCls}
+                type="email"
+                required
+                placeholder="Guardian email"
+                value={parentEmail}
+                onChange={(event) => setParentEmail(event.target.value)}
+              />
+              <input
+                className={inputCls}
+                placeholder="Guardian name (optional)"
+                value={parentName}
+                onChange={(event) => setParentName(event.target.value)}
+              />
+              <button className={btn("primary")} disabled={busy}>
+                {busy ? "Creating…" : "Create / reset parent access"}
+              </button>
+            </form>
+            {parentCredential && (
+              <div className="mt-3 border border-gold p-3 text-sm">
+                <p>
+                  Login: <strong>{parentCredential.email}</strong> · temporary password:{" "}
+                  <code className="font-mono font-bold">{parentCredential.temporaryPassword}</code>
+                </p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Linked:{" "}
+                  {parentCredential.students
+                    .map((child) => `${child.firstName} ${child.lastName} (${child.className})`)
+                    .join(", ")}
+                  . Share at{" "}
+                  <a className="underline" href="/parent-login">
+                    /parent-login
+                  </a>
+                  . This password will not be shown again.
+                </p>
+              </div>
+            )}
+          </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="eyebrow text-ink-soft">Student LMS accounts</h2>

@@ -140,7 +140,7 @@ export async function neonApi(path: string, init: RequestInit = {}) {
     } catch {
       // Keep plain-text API errors readable.
     }
-    throw new Error(detail || "Neon API returned " + response.status + ".");
+    throw new Error(`${path} failed (${response.status}): ${detail || response.statusText || "Neon API request failed."}`);
   }
   return response;
 }

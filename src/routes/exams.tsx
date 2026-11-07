@@ -206,7 +206,11 @@ function ExamsPage() {
   }
   const selected = exams.find((x) => x.id === examId);
   return (
-    <PortalShell eyebrow="Academics" title="Exams and marks">
+    <PortalShell
+      eyebrow="Academics"
+      title="Exams and marks"
+      actions={<button className={btn("ghost")} onClick={() => void loadExams()}>Reload exams</button>}
+    >
       {error && (
         <p role="alert" className="mb-4 text-owed">
           {error}

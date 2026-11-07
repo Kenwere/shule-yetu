@@ -13,9 +13,7 @@ export function SignInRequired() {
       <SiteHeader />
       <div className="mx-auto max-w-md px-6 py-24 text-center">
         <h1 className="font-display text-4xl uppercase tracking-tight">Sign in required</h1>
-        <p className="mt-3 text-sm text-ink-soft">
-          You need to log in to view the staff portal.
-        </p>
+        <p className="mt-3 text-sm text-ink-soft">You need to log in to view the staff portal.</p>
         <Link
           to="/login"
           className="mt-6 inline-block bg-ink px-6 py-3 font-bold uppercase tracking-wide text-paper hover:bg-ink-soft"
@@ -42,11 +40,18 @@ export function PortalShell({
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    void authClient.getSession().then(async ({ data }) => {
-      if (!data?.user) { setUser(null); return; }
-      const response = await neonApi("/api/me");
-      setUser(await response.json());
-    }).catch(() => setUser(null)).finally(() => setChecked(true));
+    void authClient
+      .getSession()
+      .then(async ({ data }) => {
+        if (!data?.user) {
+          setUser(null);
+          return;
+        }
+        const response = await neonApi("/api/me");
+        setUser(await response.json());
+      })
+      .catch(() => setUser(null))
+      .finally(() => setChecked(true));
   }, []);
 
   if (!checked) return null;

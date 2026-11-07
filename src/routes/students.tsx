@@ -3,29 +3,430 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Flash, Label, Panel, btn, inputCls, thCls } from "@/components/portal-ui";
 import { neonApi } from "@/lib/neon-api";
-type Student = { id: string; adm: string; first: string; last: string; gender: "Male" | "Female" | ""; dob: string | null; class: string; stream: string; guardian: string; phone: string; address: string; admitted: string; status: "Active" | "Inactive" | "Completed" };
+type Student = {
+  id: string;
+  adm: string;
+  first: string;
+  last: string;
+  gender: "Male" | "Female" | "";
+  dob: string | null;
+  class: string;
+  stream: string;
+  guardian: string;
+  phone: string;
+  address: string;
+  admitted: string;
+  status: "Active" | "Inactive" | "Completed";
+};
 type SchoolClass = { id: string; name: string; streams: string[] };
-const empty: Student = { id: "", adm: "", first: "", last: "", gender: "", dob: "", class: "", stream: "", guardian: "", phone: "", address: "", admitted: "", status: "Active" };
+const empty: Student = {
+  id: "",
+  adm: "",
+  first: "",
+  last: "",
+  gender: "",
+  dob: "",
+  class: "",
+  stream: "",
+  guardian: "",
+  phone: "",
+  address: "",
+  admitted: "",
+  status: "Active",
+};
 const td = "border-t border-ink/10 px-4 py-3";
-export const Route = createFileRoute("/students")({ head: () => ({ meta: [{ title: "Students - Shule Yetu" }, { name: "description", content: "School student register and individual profiles." }, { name: "robots", content: "noindex" }] }), component: StudentsPage });
+export const Route = createFileRoute("/students")({
+  head: () => ({
+    meta: [
+      { title: "Students - Shule Yetu" },
+      { name: "description", content: "School student register and individual profiles." },
+      { name: "robots", content: "noindex" },
+    ],
+  }),
+  component: StudentsPage,
+});
 function StudentsPage() {
-  const navigate = useNavigate(); const isProfileRoute = useRouterState({ select: state => state.location.pathname.startsWith("/students/") });
-  const [list, setList] = useState<Student[]>([]); const [classes, setClasses] = useState<SchoolClass[]>([]); const [q, setQ] = useState(""); const [filter, setFilter] = useState("All"); const [form, setForm] = useState<Student | null>(null); const [flash, setFlash] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [photoFile, setPhotoFile] = useState<File | null>(null); const [photoPreview, setPhotoPreview] = useState("");
-  async function load() { try { const [studentsResponse, classesResponse] = await Promise.all([neonApi("/api/students"), neonApi("/api/classes")]); setList(await studentsResponse.json()); setClasses(await classesResponse.json()); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Could not load students and classes."); } }
-  useEffect(() => { void load(); }, []);
-  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview); }, [photoPreview]);
-  const rows = useMemo(() => list.filter(s => (filter === "All" || s.status === filter) && `${s.first} ${s.last} ${s.adm} ${s.class}`.toLowerCase().includes(q.toLowerCase())), [list, filter, q]);
-  const selectedClass = classes.find(c => c.name === form?.class);
+  const navigate = useNavigate();
+  const isProfileRoute = useRouterState({
+    select: (state) => state.location.pathname.startsWith("/students/"),
+  });
+  const [list, setList] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [form, setForm] = useState<Student | null>(null);
+  const [flash, setFlash] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  async function load() {
+    try {
+      const [studentsResponse, classesResponse] = await Promise.all([
+        neonApi("/api/students"),
+        neonApi("/api/classes"),
+      ]);
+      setList(await studentsResponse.json());
+      setClasses(await classesResponse.json());
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load students and classes.");
+    }
+  }
+  useEffect(() => {
+    void load();
+  }, []);
+  useEffect(
+    () => () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    },
+    [photoPreview],
+  );
+  const rows = useMemo(
+    () =>
+      list.filter(
+        (s) =>
+          (filter === "All" || s.status === filter) &&
+          `${s.first} ${s.last} ${s.adm} ${s.class}`.toLowerCase().includes(q.toLowerCase()),
+      ),
+    [list, filter, q],
+  );
+  const selectedClass = classes.find((c) => c.name === form?.class);
   if (isProfileRoute) return <Outlet />;
-  async function save(e: FormEvent) { e.preventDefault(); if (!form) return; setBusy(true); setFlash(""); setError(""); try { const response = await neonApi("/api/students", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }); const saved = await response.json(); if (photoFile) await neonApi(`/api/students/${saved.id}/photo`, { method: "POST", headers: { "Content-Type": photoFile.type }, body: photoFile }); setFlash(`${form.first} ${form.last} saved.`); setForm(null); setPhotoFile(null); setPhotoPreview(""); await load(); } catch (err) { setError(err instanceof Error ? err.message : "Could not save student or upload photo."); } finally { setBusy(false); } }
-  async function remove(student: Student) { if (!window.confirm(`Delete ${student.first} ${student.last} and their fee history?`)) return; try { await neonApi(`/api/students/${student.id}`, { method: "DELETE" }); setFlash(`${student.first} ${student.last} removed.`); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Could not remove student."); } }
-  return <PortalShell eyebrow="Register" title="Students" actions={<button className={btn()} onClick={() => { setPhotoFile(null); setPhotoPreview(""); setForm({ ...empty }); }}>Add student</button>}><Flash message={flash || null} />{error && <p role="alert" className="mb-4 text-sm text-owed">{error}</p>}
-    <div className="mb-4 grid gap-4 sm:grid-cols-3">{(["Active", "Inactive", "Completed"] as const).map(s => <div key={s} className="border border-ink/10 bg-paper p-4"><div className="eyebrow text-[10px]">{s} students</div><div className="mt-1 font-display text-3xl">{list.filter(x => x.status === s).length}</div></div>)}</div>
-    {form && <Panel title={form.id ? `Edit ${form.adm}` : "New student"} className="mb-6"><form onSubmit={save} className="grid gap-3 sm:grid-cols-3"><Label text="Admission number"><input className={inputCls} value={form.adm} onChange={e => setForm({ ...form, adm: e.target.value })} placeholder="Assigned automatically if blank" /></Label><Label text="First name"><input required className={inputCls} value={form.first} onChange={e => setForm({ ...form, first: e.target.value })} /></Label><Label text="Last name"><input required className={inputCls} value={form.last} onChange={e => setForm({ ...form, last: e.target.value })} /></Label>
-      <Label text="Gender"><select required className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as Student["gender"] })}><option value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option></select></Label><Label text="Student photo (JPG, PNG, WEBP; max 10 MB)"><input type="file" accept="image/jpeg,image/png,image/webp" className={inputCls} onChange={e=>{const file=e.target.files?.[0];if(!file)return;if(file.size>10*1024*1024){setError("Student photos must be 10 MB or smaller.");e.target.value="";return;}setError("");setPhotoFile(file);setPhotoPreview(URL.createObjectURL(file));}} /></Label>{photoPreview&&<div className="sm:col-span-3"><img src={photoPreview} alt="Selected student photo preview" className="h-28 w-28 rounded-full object-cover" /></div>}<Label text="Date of birth"><input type="date" className={inputCls} value={form.dob || ""} onChange={e => setForm({ ...form, dob: e.target.value })} /></Label><Label text="Class"><select required className={inputCls} value={form.class} onChange={e => setForm({ ...form, class: e.target.value, stream: "" })}><option value="">Select class</option>{classes.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select></Label><Label text="Stream"><select required disabled={!selectedClass} className={inputCls} value={form.stream} onChange={e => setForm({ ...form, stream: e.target.value })}><option value="">Select stream</option>{(selectedClass?.streams || []).map(s => <option key={s}>{s}</option>)}</select></Label>
-      <Label text="Parent / guardian"><input className={inputCls} value={form.guardian} onChange={e => setForm({ ...form, guardian: e.target.value })} /></Label><Label text="Guardian phone"><input className={inputCls} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Label><Label text="Address"><input className={inputCls} value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></Label><Label text="Admission date"><input type="date" className={inputCls} value={form.admitted || ""} onChange={e => setForm({ ...form, admitted: e.target.value })} /></Label><Label text="Status"><select className={inputCls} value={form.status} onChange={e => setForm({ ...form, status: e.target.value as Student["status"] })}><option>Active</option><option>Inactive</option><option>Completed</option></select></Label>
-      <div className="flex gap-2 sm:col-span-3"><button className={btn()} disabled={busy || !classes.length}>{busy ? "Saving..." : "Save student"}</button><button type="button" className={btn("ghost")} onClick={() => { setForm(null); setPhotoFile(null); setPhotoPreview(""); }}>Cancel</button>{!classes.length && <span className="self-center text-sm text-owed">Add a class and stream before registering students.</span>}</div></form></Panel>}
-    <div className="mb-3 flex flex-wrap gap-2"><input className={`${inputCls} max-w-xs`} placeholder="Search name, admission no. or class" value={q} onChange={e => setQ(e.target.value)} />{["All", "Active", "Inactive", "Completed"].map(s => <button key={s} onClick={() => setFilter(s)} className={btn(filter === s ? "primary" : "ghost")}>{s}</button>)}</div>
-    <div className="overflow-x-auto border border-ink/10 bg-paper"><table className="w-full text-left text-sm"><thead><tr>{["Adm", "Name", "Gender", "Class", "Guardian", "Status", "Actions"].map(h => <th key={h} className={thCls}>{h}</th>)}</tr></thead><tbody>{rows.map(s => <tr key={s.id} className="cursor-pointer hover:bg-ink/5" role="link" tabIndex={0} onClick={e => { if ((e.target as HTMLElement).closest("a,button")) return; void navigate({ to: "/students/$studentId", params: { studentId: s.id } }); }} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void navigate({ to: "/students/$studentId", params: { studentId: s.id } }); } }}><td className={`${td} font-mono text-xs`}>{s.adm}</td><td className={`${td} font-semibold`}><a className="underline decoration-gold underline-offset-4" href={"/students/"+encodeURIComponent(s.id)}>{s.first} {s.last}</a></td><td className={td}>{s.gender || "-"}</td><td className={td}>{s.class} {s.stream}</td><td className={td}>{s.guardian}{s.phone ? ` - ${s.phone}` : ""}</td><td className={td}>{s.status}</td><td className={`${td} whitespace-nowrap`}><button className={btn("ghost")} onClick={() => { setPhotoFile(null); setPhotoPreview(""); setForm({ ...s }); }}>Edit</button> <button className={btn("bad")} onClick={() => void remove(s)}>Delete</button></td></tr>)}{!rows.length && <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-ink-soft">{error ? "Students could not be loaded." : "No students yet. Add a student to begin the register."}</td></tr>}</tbody></table></div>
-  </PortalShell>;
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!form) return;
+    setBusy(true);
+    setFlash("");
+    setError("");
+    try {
+      const response = await neonApi("/api/students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const saved = await response.json();
+      if (photoFile)
+        await neonApi(`/api/students/${saved.id}/photo`, {
+          method: "POST",
+          headers: { "Content-Type": photoFile.type },
+          body: photoFile,
+        });
+      setFlash(`${form.first} ${form.last} saved.`);
+      setForm(null);
+      setPhotoFile(null);
+      setPhotoPreview("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save student or upload photo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(student: Student) {
+    if (!window.confirm(`Delete ${student.first} ${student.last} and their fee history?`)) return;
+    try {
+      await neonApi(`/api/students/${student.id}`, { method: "DELETE" });
+      setFlash(`${student.first} ${student.last} removed.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove student.");
+    }
+  }
+  return (
+    <PortalShell
+      eyebrow="Register"
+      title="Students"
+      actions={
+        <button
+          className={btn()}
+          onClick={() => {
+            setPhotoFile(null);
+            setPhotoPreview("");
+            setForm({ ...empty });
+          }}
+        >
+          Add student
+        </button>
+      }
+    >
+      <Flash message={flash || null} />
+      {error && (
+        <p role="alert" className="mb-4 text-sm text-owed">
+          {error}
+        </p>
+      )}
+      <div className="mb-4 grid gap-4 sm:grid-cols-3">
+        {(["Active", "Inactive", "Completed"] as const).map((s) => (
+          <div key={s} className="border border-ink/10 bg-paper p-4">
+            <div className="eyebrow text-[10px]">{s} students</div>
+            <div className="mt-1 font-display text-3xl">
+              {list.filter((x) => x.status === s).length}
+            </div>
+          </div>
+        ))}
+      </div>
+      {form && (
+        <Panel title={form.id ? `Edit ${form.adm}` : "New student"} className="mb-6">
+          <form onSubmit={save} className="grid gap-3 sm:grid-cols-3">
+            <Label text="Admission number">
+              <input
+                className={inputCls}
+                value={form.adm}
+                onChange={(e) => setForm({ ...form, adm: e.target.value })}
+                placeholder="Assigned automatically if blank"
+              />
+            </Label>
+            <Label text="First name">
+              <input
+                required
+                className={inputCls}
+                value={form.first}
+                onChange={(e) => setForm({ ...form, first: e.target.value })}
+              />
+            </Label>
+            <Label text="Last name">
+              <input
+                required
+                className={inputCls}
+                value={form.last}
+                onChange={(e) => setForm({ ...form, last: e.target.value })}
+              />
+            </Label>
+            <Label text="Gender">
+              <select
+                required
+                className={inputCls}
+                value={form.gender}
+                onChange={(e) => setForm({ ...form, gender: e.target.value as Student["gender"] })}
+              >
+                <option value="">Select gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
+            </Label>
+            <Label text="Student photo (JPG, PNG, WEBP; max 10 MB)">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className={inputCls}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 10 * 1024 * 1024) {
+                    setError("Student photos must be 10 MB or smaller.");
+                    e.target.value = "";
+                    return;
+                  }
+                  setError("");
+                  setPhotoFile(file);
+                  setPhotoPreview(URL.createObjectURL(file));
+                }}
+              />
+            </Label>
+            {photoPreview && (
+              <div className="sm:col-span-3">
+                <img
+                  src={photoPreview}
+                  alt="Selected student photo preview"
+                  className="h-28 w-28 rounded-full object-cover"
+                />
+              </div>
+            )}
+            <Label text="Date of birth">
+              <input
+                type="date"
+                className={inputCls}
+                value={form.dob || ""}
+                onChange={(e) => setForm({ ...form, dob: e.target.value })}
+              />
+            </Label>
+            <Label text="Class">
+              <select
+                required
+                className={inputCls}
+                value={form.class}
+                onChange={(e) => setForm({ ...form, class: e.target.value, stream: "" })}
+              >
+                <option value="">Select class</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </Label>
+            <Label text="Stream">
+              <select
+                required
+                disabled={!selectedClass}
+                className={inputCls}
+                value={form.stream}
+                onChange={(e) => setForm({ ...form, stream: e.target.value })}
+              >
+                <option value="">Select stream</option>
+                {(selectedClass?.streams || []).map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </Label>
+            <Label text="Parent / guardian">
+              <input
+                className={inputCls}
+                value={form.guardian}
+                onChange={(e) => setForm({ ...form, guardian: e.target.value })}
+              />
+            </Label>
+            <Label text="Guardian phone">
+              <input
+                className={inputCls}
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              />
+            </Label>
+            <Label text="Address">
+              <input
+                className={inputCls}
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+              />
+            </Label>
+            <Label text="Admission date">
+              <input
+                type="date"
+                className={inputCls}
+                value={form.admitted || ""}
+                onChange={(e) => setForm({ ...form, admitted: e.target.value })}
+              />
+            </Label>
+            <Label text="Status">
+              <select
+                className={inputCls}
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value as Student["status"] })}
+              >
+                <option>Active</option>
+                <option>Inactive</option>
+                <option>Completed</option>
+              </select>
+            </Label>
+            <div className="flex gap-2 sm:col-span-3">
+              <button className={btn()} disabled={busy || !classes.length}>
+                {busy ? "Saving..." : "Save student"}
+              </button>
+              <button
+                type="button"
+                className={btn("ghost")}
+                onClick={() => {
+                  setForm(null);
+                  setPhotoFile(null);
+                  setPhotoPreview("");
+                }}
+              >
+                Cancel
+              </button>
+              {!classes.length && (
+                <span className="self-center text-sm text-owed">
+                  Add a class and stream before registering students.
+                </span>
+              )}
+            </div>
+          </form>
+        </Panel>
+      )}
+      <div className="mb-3 flex flex-wrap gap-2">
+        <input
+          className={`${inputCls} max-w-xs`}
+          placeholder="Search name, admission no. or class"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        {["All", "Active", "Inactive", "Completed"].map((s) => (
+          <button
+            key={s}
+            onClick={() => setFilter(s)}
+            className={btn(filter === s ? "primary" : "ghost")}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+      <div className="overflow-x-auto border border-ink/10 bg-paper">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr>
+              {["Adm", "Name", "Gender", "Class", "Guardian", "Status", "Actions"].map((h) => (
+                <th key={h} className={thCls}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr
+                key={s.id}
+                className="cursor-pointer hover:bg-ink/5"
+                role="link"
+                tabIndex={0}
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest("a,button")) return;
+                  void navigate({ to: "/students/$studentId", params: { studentId: s.id } });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void navigate({ to: "/students/$studentId", params: { studentId: s.id } });
+                  }
+                }}
+              >
+                <td className={`${td} font-mono text-xs`}>{s.adm}</td>
+                <td className={`${td} font-semibold`}>
+                  <a
+                    className="underline decoration-gold underline-offset-4"
+                    href={"/students/" + encodeURIComponent(s.id)}
+                  >
+                    {s.first} {s.last}
+                  </a>
+                </td>
+                <td className={td}>{s.gender || "-"}</td>
+                <td className={td}>
+                  {s.class} {s.stream}
+                </td>
+                <td className={td}>
+                  {s.guardian}
+                  {s.phone ? ` - ${s.phone}` : ""}
+                </td>
+                <td className={td}>{s.status}</td>
+                <td className={`${td} whitespace-nowrap`}>
+                  <button
+                    className={btn("ghost")}
+                    onClick={() => {
+                      setPhotoFile(null);
+                      setPhotoPreview("");
+                      setForm({ ...s });
+                    }}
+                  >
+                    Edit
+                  </button>{" "}
+                  <button className={btn("bad")} onClick={() => void remove(s)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {!rows.length && (
+              <tr>
+                <td colSpan={7} className="px-4 py-10 text-center text-sm text-ink-soft">
+                  {error
+                    ? "Students could not be loaded."
+                    : "No students yet. Add a student to begin the register."}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </PortalShell>
+  );
 }

@@ -3,7 +3,20 @@ import { Pool } from "pg";
 
 const connectionString = process.env.DATABASE_URL_UNPOOLED;
 if (!connectionString) throw new Error("DATABASE_URL_UNPOOLED is required for migrations.");
-const migrations = ["0001_school_notes.sql", "0002_school_profiles.sql", "0003_school_portal.sql", "0004_school_events.sql", "0005_class_term_fees.sql", "0006_school_academic_terms.sql", "0007_fee_payment_idempotency.sql", "0008_attendance_excused.sql", "0009_teacher_assignments.sql", "0010_exam_academic_year.sql", "0011_student_photo.sql", "0012_school_logo.sql"];
+const migrations = [
+  "0001_school_notes.sql",
+  "0002_school_profiles.sql",
+  "0003_school_portal.sql",
+  "0004_school_events.sql",
+  "0005_class_term_fees.sql",
+  "0006_school_academic_terms.sql",
+  "0007_fee_payment_idempotency.sql",
+  "0008_attendance_excused.sql",
+  "0009_teacher_assignments.sql",
+  "0010_exam_academic_year.sql",
+  "0011_student_photo.sql",
+  "0012_school_logo.sql",
+];
 const pool = new Pool({ connectionString, max: 1 });
 try {
   for (const migration of migrations) {

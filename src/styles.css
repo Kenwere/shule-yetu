@@ -88,7 +88,13 @@
 }
 
 @utility stripes {
-  background-image: repeating-linear-gradient(115deg, var(--gold) 0, var(--gold) 2px, transparent 2px, transparent 22px);
+  background-image: repeating-linear-gradient(
+    115deg,
+    var(--gold) 0,
+    var(--gold) 2px,
+    transparent 2px,
+    transparent 22px
+  );
 }
 @utility eyebrow {
   font-family: var(--font-mono);
@@ -98,15 +104,21 @@
 }
 
 @keyframes wipe {
-  from { clip-path: inset(0 100% 0 0); }
-  to { clip-path: inset(0 0 0 0); }
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
 }
 @utility animate-wipe {
   animation: wipe 0.8s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 @layer base {
-  * { border-color: var(--color-border); }
+  * {
+    border-color: var(--color-border);
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);

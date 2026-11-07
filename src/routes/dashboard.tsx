@@ -3,12 +3,198 @@ import { useEffect, useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { btn } from "@/components/portal-ui";
 import { neonApi } from "@/lib/neon-api";
-type Stats = { students: number | string; staff: number | string; paid: number | string; balance: number | string };
-type Announcement = { id: string; title: string; body: string; authorName: string; expiresAt: string };
-type SchoolEvent = { id: string; title: string; details: string; location: string; startsAt: string };
-export const Route = createFileRoute("/dashboard")({ head: () => ({ meta: [{ title: "Dashboard - Shule Yetu" }, { name: "description", content: "School administration overview." }, { name: "robots", content: "noindex" }] }), component: Dashboard });
-function MiniCalendar() { const today = new Date(), year = today.getFullYear(), month = today.getMonth(), day = today.getDate(); const first = (new Date(year, month, 1).getDay() + 6) % 7; const total = new Date(year, month + 1, 0).getDate(); return <section className="border border-ink/10 bg-paper"><div className="flex items-center justify-between bg-ink px-4 py-4 text-paper"><div><div className="eyebrow text-[10px] text-gold">{today.toLocaleDateString(undefined, { weekday: "long" })}</div><div className="font-display text-lg uppercase">{today.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</div></div><span className="font-display text-4xl text-gold">{day}</span></div><div className="grid grid-cols-7 gap-1 p-3 text-center text-xs">{["M", "T", "W", "T", "F", "S", "S"].map((x, i) => <span key={`d${i}`} className="py-1 font-mono text-ink-soft">{x}</span>)}{Array.from({ length: first }, (_, i) => <span key={`b${i}`} />)}{Array.from({ length: total }, (_, i) => <span key={i} className={`py-1 ${i + 1 === day ? "bg-gold font-bold" : ""}`}>{i + 1}</span>)}</div></section>; }
-function Dashboard() { const [stats, setStats] = useState<Stats | null>(null); const [announcements, setAnnouncements] = useState<Announcement[]>([]); const [events, setEvents] = useState<SchoolEvent[]>([]); const [error, setError] = useState(""); useEffect(() => { void Promise.all([neonApi("/api/dashboard").then(r => r.json()).then(setStats), neonApi("/api/announcements").then(r => r.json()).then(setAnnouncements), neonApi("/api/events").then(r => r.json()).then(setEvents)]).catch(e => setError(e instanceof Error ? e.message : "Could not load the school overview.")); }, []); const money = (n: string | number | undefined) => `KES ${Number(n || 0).toLocaleString()}`;
-  return <PortalShell eyebrow="School overview" title="Dashboard"><div className="mb-6 flex flex-wrap gap-2">{[["Add student", "/students"], ["Manage staff", "/teachers"], ["School settings", "/settings"], ["Announcements and events", "/announcements"]].map(([label, to]) => <Link key={to} to={to as never} className={btn("ghost")}>{label}</Link>)}</div>{error && <p role="alert" className="mb-4 text-sm text-owed">{error}</p>}<div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]"><div className="space-y-6"><section className="grid gap-4 sm:grid-cols-2"><Metric title="Active students" value={stats?.students ?? "-"} /><Metric title="Active staff" value={stats?.staff ?? "-"} /><Metric title="Payments recorded" value={money(stats?.paid)} /><Metric title="Current fee balance" value={money(stats?.balance)} /></section><section className="border border-ink/10 bg-paper p-6"><h2 className="eyebrow mb-3 text-ink-soft">School records</h2><p className="text-sm text-ink-soft">This overview shows records saved for your school. Add students, classes, attendance, payments, and announcements to populate it.</p></section></div><aside className="space-y-6 self-start xl:sticky xl:top-20"><div><h2 className="eyebrow mb-3 text-ink-soft">Today</h2><MiniCalendar /></div><section><div className="mb-3 flex items-center justify-between"><h2 className="eyebrow text-ink-soft">Upcoming events</h2><Link to="/announcements" className="text-xs underline">Manage</Link></div><div className="space-y-2">{events.map(e => <article key={e.id} className="border border-ink/10 border-l-2 border-l-gold bg-paper px-4 py-3"><h3 className="text-sm font-semibold">{e.title}</h3><p className="mt-1 text-xs text-ink-soft">{new Date(e.startsAt).toLocaleString()}{e.location ? ` - ${e.location}` : ""}</p>{e.details && <p className="mt-1 text-xs text-ink-soft">{e.details}</p>}</article>)}{!events.length && <p className="border border-ink/10 bg-paper p-4 text-sm text-ink-soft">No upcoming events.</p>}</div></section><section><div className="mb-3 flex items-center justify-between"><h2 className="eyebrow text-ink-soft">Announcements</h2><Link to="/announcements" className="text-xs underline">Manage</Link></div><div className="space-y-2">{announcements.map(a => <article key={a.id} className="border border-ink/10 border-l-2 border-l-gold bg-paper px-4 py-3"><h3 className="text-sm font-semibold">{a.title}</h3><p className="mt-1 whitespace-pre-wrap text-xs text-ink-soft">{a.body}</p><p className="mt-2 text-[10px] text-ink-soft">By {a.authorName}</p></article>)}{!announcements.length && <p className="border border-ink/10 bg-paper p-4 text-sm text-ink-soft">No active announcements.</p>}</div></section></aside></div></PortalShell>;
+type Stats = {
+  students: number | string;
+  staff: number | string;
+  paid: number | string;
+  balance: number | string;
+};
+type Announcement = {
+  id: string;
+  title: string;
+  body: string;
+  authorName: string;
+  expiresAt: string;
+};
+type SchoolEvent = {
+  id: string;
+  title: string;
+  details: string;
+  location: string;
+  startsAt: string;
+};
+export const Route = createFileRoute("/dashboard")({
+  head: () => ({
+    meta: [
+      { title: "Dashboard - Shule Yetu" },
+      { name: "description", content: "School administration overview." },
+      { name: "robots", content: "noindex" },
+    ],
+  }),
+  component: Dashboard,
+});
+function MiniCalendar() {
+  const today = new Date(),
+    year = today.getFullYear(),
+    month = today.getMonth(),
+    day = today.getDate();
+  const first = (new Date(year, month, 1).getDay() + 6) % 7;
+  const total = new Date(year, month + 1, 0).getDate();
+  return (
+    <section className="border border-ink/10 bg-paper">
+      <div className="flex items-center justify-between bg-ink px-4 py-4 text-paper">
+        <div>
+          <div className="eyebrow text-[10px] text-gold">
+            {today.toLocaleDateString(undefined, { weekday: "long" })}
+          </div>
+          <div className="font-display text-lg uppercase">
+            {today.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+          </div>
+        </div>
+        <span className="font-display text-4xl text-gold">{day}</span>
+      </div>
+      <div className="grid grid-cols-7 gap-1 p-3 text-center text-xs">
+        {["M", "T", "W", "T", "F", "S", "S"].map((x, i) => (
+          <span key={`d${i}`} className="py-1 font-mono text-ink-soft">
+            {x}
+          </span>
+        ))}
+        {Array.from({ length: first }, (_, i) => (
+          <span key={`b${i}`} />
+        ))}
+        {Array.from({ length: total }, (_, i) => (
+          <span key={i} className={`py-1 ${i + 1 === day ? "bg-gold font-bold" : ""}`}>
+            {i + 1}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
 }
-function Metric({ title, value }: { title: string; value: string | number }) { return <article className="border border-ink/10 bg-paper p-5"><h2 className="eyebrow text-[10px] text-ink-soft">{title}</h2><p className="mt-2 break-words font-display text-2xl sm:text-3xl">{value}</p></article>; }
+function Dashboard() {
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [events, setEvents] = useState<SchoolEvent[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void Promise.all([
+      neonApi("/api/dashboard")
+        .then((r) => r.json())
+        .then(setStats),
+      neonApi("/api/announcements")
+        .then((r) => r.json())
+        .then(setAnnouncements),
+      neonApi("/api/events")
+        .then((r) => r.json())
+        .then(setEvents),
+    ]).catch((e) =>
+      setError(e instanceof Error ? e.message : "Could not load the school overview."),
+    );
+  }, []);
+  const money = (n: string | number | undefined) => `KES ${Number(n || 0).toLocaleString()}`;
+  return (
+    <PortalShell eyebrow="School overview" title="Dashboard">
+      <div className="mb-6 flex flex-wrap gap-2">
+        {[
+          ["Add student", "/students"],
+          ["Manage staff", "/teachers"],
+          ["School settings", "/settings"],
+          ["Announcements and events", "/announcements"],
+        ].map(([label, to]) => (
+          <Link key={to} to={to as never} className={btn("ghost")}>
+            {label}
+          </Link>
+        ))}
+      </div>
+      {error && (
+        <p role="alert" className="mb-4 text-sm text-owed">
+          {error}
+        </p>
+      )}
+      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-6">
+          <section className="grid gap-4 sm:grid-cols-2">
+            <Metric title="Active students" value={stats?.students ?? "-"} />
+            <Metric title="Active staff" value={stats?.staff ?? "-"} />
+            <Metric title="Payments recorded" value={money(stats?.paid)} />
+            <Metric title="Current fee balance" value={money(stats?.balance)} />
+          </section>
+          <section className="border border-ink/10 bg-paper p-6">
+            <h2 className="eyebrow mb-3 text-ink-soft">School records</h2>
+            <p className="text-sm text-ink-soft">
+              This overview shows records saved for your school. Add students, classes, attendance,
+              payments, and announcements to populate it.
+            </p>
+          </section>
+        </div>
+        <aside className="space-y-6 self-start xl:sticky xl:top-20">
+          <div>
+            <h2 className="eyebrow mb-3 text-ink-soft">Today</h2>
+            <MiniCalendar />
+          </div>
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="eyebrow text-ink-soft">Upcoming events</h2>
+              <Link to="/announcements" className="text-xs underline">
+                Manage
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {events.map((e) => (
+                <article
+                  key={e.id}
+                  className="border border-ink/10 border-l-2 border-l-gold bg-paper px-4 py-3"
+                >
+                  <h3 className="text-sm font-semibold">{e.title}</h3>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    {new Date(e.startsAt).toLocaleString()}
+                    {e.location ? ` - ${e.location}` : ""}
+                  </p>
+                  {e.details && <p className="mt-1 text-xs text-ink-soft">{e.details}</p>}
+                </article>
+              ))}
+              {!events.length && (
+                <p className="border border-ink/10 bg-paper p-4 text-sm text-ink-soft">
+                  No upcoming events.
+                </p>
+              )}
+            </div>
+          </section>
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="eyebrow text-ink-soft">Announcements</h2>
+              <Link to="/announcements" className="text-xs underline">
+                Manage
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {announcements.map((a) => (
+                <article
+                  key={a.id}
+                  className="border border-ink/10 border-l-2 border-l-gold bg-paper px-4 py-3"
+                >
+                  <h3 className="text-sm font-semibold">{a.title}</h3>
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-ink-soft">{a.body}</p>
+                  <p className="mt-2 text-[10px] text-ink-soft">By {a.authorName}</p>
+                </article>
+              ))}
+              {!announcements.length && (
+                <p className="border border-ink/10 bg-paper p-4 text-sm text-ink-soft">
+                  No active announcements.
+                </p>
+              )}
+            </div>
+          </section>
+        </aside>
+      </div>
+    </PortalShell>
+  );
+}
+function Metric({ title, value }: { title: string; value: string | number }) {
+  return (
+    <article className="border border-ink/10 bg-paper p-5">
+      <h2 className="eyebrow text-[10px] text-ink-soft">{title}</h2>
+      <p className="mt-2 break-words font-display text-2xl sm:text-3xl">{value}</p>
+    </article>
+  );
+}

@@ -57,8 +57,10 @@ export async function handleAsk(request: Request) {
     result.toUIMessageStreamResponse({
       onError: (e) => {
         const status = (e as { statusCode?: number })?.statusCode;
-        if (status === 429) return "We're getting lots of questions — please try again in a moment.";
-        if (status === 402) return "The assistant is temporarily unavailable. Please contact admissions.";
+        if (status === 429)
+          return "We're getting lots of questions — please try again in a moment.";
+        if (status === 402)
+          return "The assistant is temporarily unavailable. Please contact admissions.";
         return "Sorry, something went wrong. Please try again.";
       },
     }),

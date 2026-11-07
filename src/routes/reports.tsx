@@ -1,37 +1,404 @@
-import {createFileRoute} from "@tanstack/react-router";
-import {useEffect,useMemo,useState} from "react";
-import {PortalShell} from "@/components/PortalShell";
-import {btn,inputCls,tdCls,thCls} from "@/components/portal-ui";
-import {neonApi} from "@/lib/neon-api";
-type SchoolClass={id:string;name:string;streams:string[]};
-type Exam={id:string;name:string;className:string;stream:string;term:string;academicYear:string};
-type ReportKind="students"|"fees"|"attendance"|"ranked";
-type DataRow=Record<string,unknown>;
-type Ranked={schoolName:string;name:string;className:string;stream:string;term:string;academicYear:string;subjects:string[];students:DataRow[]};
-export const Route=createFileRoute("/reports")({head:()=>({meta:[{title:"School reports - Shule Yetu"},{name:"robots",content:"noindex"}]}),component:ReportsPage});
-function ReportsPage(){
- const [kind,setKind]=useState<ReportKind>("students");const [classes,setClasses]=useState<SchoolClass[]>([]);const [exams,setExams]=useState<Exam[]>([]);const [role,setRole]=useState("");const [permissions,setPermissions]=useState<string[]>([]);
- const [className,setClassName]=useState("");const [stream,setStream]=useState("");const [term,setTerm]=useState("");const [date,setDate]=useState(new Date().toISOString().slice(0,10));const [examId,setExamId]=useState("");const [rows,setRows]=useState<DataRow[]>([]);const [ranked,setRanked]=useState<Ranked|null>(null);const [q,setQ]=useState("");const [page,setPage]=useState(0);const [error,setError]=useState("");const [busy,setBusy]=useState(false);
- useEffect(()=>{void Promise.all([neonApi("/api/me"),neonApi("/api/classes")]).then(async([mr,cr])=>{const me=await mr.json();setRole(me.role||"");setPermissions(me.permissions||[]);setClasses(await cr.json());if(me.school?.academicYear)setTerm(`${me.school.activeTerm||"Term 1"} ${me.school.academicYear}`);if(me.role==="Admin")void neonApi("/api/exams").then(r=>r.json()).then((list:Exam[])=>{setExams(list);setExamId(list[0]?.id||"")})}).catch(e=>setError(e instanceof Error?e.message:"Could not load report filters."))},[]);
- const selected=classes.find(c=>c.name===className);const can=(p:string)=>role==="Admin"||permissions.includes(p);
- async function run(){setBusy(true);setError("");setRows([]);setRanked(null);setPage(0);try{if(kind==="ranked"){if(!examId)throw new Error("Select an exam.");const r=await neonApi(`/api/exams/${examId}/report`);const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not load ranked report.");setRanked(d);return}const params=new URLSearchParams({class:className,stream,...(kind==="fees"?{term}:{}),...(kind==="attendance"?{date}:{})});const r=await neonApi(`/api/reports/${kind}?${params}`);const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not load report.");setRows(d)}catch(e){setError(e instanceof Error?e.message:"Could not load report.")}finally{setBusy(false)}}
- const columns=useMemo(()=>{if(kind==="students")return [["adm","Admission"],["first","First name"],["last","Last name"],["gender","Gender"],["class","Class"],["stream","Stream"],["guardian","Parent / guardian"],["phone","Phone"],["status","Status"]];if(kind==="fees")return [["adm","Admission"],["first","First name"],["last","Last name"],["class","Class"],["stream","Stream"],["billed","Billed"],["paid","Paid"],["balance","Balance"]];return [["adm","Admission"],["first","First name"],["last","Last name"],["class","Class"],["stream","Stream"],["status","Attendance"]]},[kind]);
- const source=kind==="ranked"?(ranked?.students||[]):rows;const filtered=source.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));const pageSize=50;const visible=filtered.slice(page*pageSize,(page+1)*pageSize);const feeSum=(key:string)=>rows.reduce((sum,r)=>sum+Number(r[key]||0),0);const statusCount=(s:string)=>rows.filter(r=>r.status===s).length;
- const tabs:[ReportKind,string,string][]=[["students","Student list","view_students"],["fees","Fee and balance","view_fees"],["attendance","Attendance","view_attendance"],["ranked","Ranked exam","view_exams"]];const enabled=tabs.filter(([reportKind,,permission])=>can(permission)&&(reportKind!=="ranked"||role==="Admin"));
- return <PortalShell eyebrow="Administration" title="Reports" actions={<button className={`${btn("ghost")} print:hidden`} onClick={()=>window.print()} disabled={!source.length}>Print report</button>}>
-  <p className="mb-5 max-w-3xl text-sm text-ink-soft">Build searchable reports from current school records. Select filters, then generate or print the report.</p>{error&&<p role="alert" className="mb-4 text-sm text-owed">{error}</p>}
-  <div className="mb-5 flex flex-wrap gap-2 print:hidden">{enabled.map(([value,label])=><button key={value} className={btn(kind===value?"primary":"ghost")} onClick={()=>{setKind(value);setRows([]);setRanked(null);setError("")}}>{label}</button>)}</div>
-  <div className="mb-5 grid gap-3 border border-ink/10 bg-paper p-4 sm:grid-cols-2 lg:grid-cols-4 print:hidden">
-   {kind!=="ranked"&&<label className="text-sm">Class<select className={inputCls} value={className} onChange={e=>{setClassName(e.target.value);setStream("")}}><option value="">All classes</option>{classes.map(c=><option key={c.id}>{c.name}</option>)}</select></label>}
-   {kind!=="ranked"&&<label className="text-sm">Stream<select className={inputCls} disabled={!className} value={stream} onChange={e=>setStream(e.target.value)}><option value="">All streams</option>{(selected?.streams||[]).map(s=><option key={s}>{s}</option>)}</select></label>}
-   {kind==="fees"&&<label className="text-sm">Term / academic year<input className={inputCls} value={term} onChange={e=>setTerm(e.target.value)} placeholder="All terms, e.g. Term 1 2027"/></label>}
-   {kind==="attendance"&&<label className="text-sm">Date<input type="date" className={inputCls} value={date} onChange={e=>setDate(e.target.value)}/></label>}
-   {kind==="ranked"&&<label className="text-sm">Exam<select className={inputCls} value={examId} onChange={e=>setExamId(e.target.value)}><option value="">Select exam</option>{exams.map(e=><option key={e.id} value={e.id}>{e.name} - {e.className} {e.stream} / {e.term} {e.academicYear}</option>)}</select></label>}
-   <div className="flex items-end"><button className={btn()} disabled={busy} onClick={()=>void run()}>{busy?"Generating...":"Generate report"}</button></div>
-  </div>
-  {kind==="fees"&&rows.length>0&&<div className="mb-4 grid gap-3 sm:grid-cols-3 print:grid-cols-3">{[["Billed",feeSum("billed")],["Paid",feeSum("paid")],["Outstanding",feeSum("balance")]].map(([label,value])=><div key={label} className="border border-ink/10 bg-paper p-4"><div className="eyebrow text-[10px] text-ink-soft">{label}</div><div className="font-display text-xl">KES {Number(value).toLocaleString()}</div></div>)}</div>}
-  {kind==="attendance"&&rows.length>0&&<div className="mb-4 flex flex-wrap gap-4 text-sm print:hidden">{["Present","Absent","Late","Excused","Not marked"].map(s=><span key={s}>{s}: <strong>{statusCount(s)}</strong></span>)}</div>}
-  {ranked&&<div className="mb-4 hidden print:block"><h2 className="font-display text-xl">{ranked.schoolName} - {ranked.name}</h2><p>{ranked.className} {ranked.stream} - {ranked.term} {ranked.academicYear}</p></div>}
-  {(rows.length>0||ranked)&&<><div className="mb-3 flex flex-wrap items-center gap-3 print:hidden"><input className={`${inputCls} max-w-sm`} value={q} onChange={e=>{setQ(e.target.value);setPage(0)}} placeholder="Search this report"/><span className="text-sm text-ink-soft">{filtered.length} records</span></div><div className="overflow-x-auto border border-ink/10 bg-paper"><table className="w-full text-left text-sm"><thead><tr>{kind==="ranked"?["Position","Student","Admission","Stream",...(ranked?.subjects||[]),"Total"].map(x=><th key={x} className={thCls}>{x}</th>):columns.map(([key,label])=><th key={key} className={thCls}>{label}</th>)}</tr></thead><tbody>{visible.map((r,i)=><tr key={String(r.id||`${r.adm}-${i}`)}>{kind==="ranked"?<><td className={tdCls}>{String(r.position)}</td><td className={tdCls}>{String(r.name)}</td><td className={tdCls}>{String(r.adm)}</td><td className={tdCls}>{String(r.stream)}</td>{(ranked?.subjects||[]).map(sub=><td key={sub} className={tdCls}>{String((r.marks as Record<string,unknown>)?.[sub]??"-")}</td>)}<td className={`${tdCls} font-semibold`}>{Number(r.total||0).toFixed(1)}</td></>:columns.map(([key])=><td key={key} className={tdCls}>{["billed","paid","balance"].includes(key)?`KES ${Number(r[key]||0).toLocaleString()}`:String(r[key]??"")}</td>)}</tr>)}{!visible.length&&<tr><td colSpan={kind==="ranked"?(ranked?.subjects.length||0)+5:columns.length} className="px-4 py-8 text-center text-ink-soft">No records match this report.</td></tr>}</tbody></table></div><div className="mt-4 flex gap-2 print:hidden"><button className={btn("ghost")} disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>Previous</button><span className="self-center text-sm">Page {page+1} of {Math.max(1,Math.ceil(filtered.length/pageSize))}</span><button className={btn("ghost")} disabled={(page+1)*pageSize>=filtered.length} onClick={()=>setPage(p=>p+1)}>Next</button></div></>}
- </PortalShell>
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { PortalShell } from "@/components/PortalShell";
+import { btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
+import { neonApi } from "@/lib/neon-api";
+type SchoolClass = { id: string; name: string; streams: string[] };
+type Exam = {
+  id: string;
+  name: string;
+  className: string;
+  stream: string;
+  term: string;
+  academicYear: string;
+};
+type ReportKind = "students" | "fees" | "attendance" | "ranked";
+type DataRow = Record<string, unknown>;
+type Ranked = {
+  schoolName: string;
+  name: string;
+  className: string;
+  stream: string;
+  term: string;
+  academicYear: string;
+  subjects: string[];
+  students: DataRow[];
+};
+export const Route = createFileRoute("/reports")({
+  head: () => ({
+    meta: [{ title: "School reports - Shule Yetu" }, { name: "robots", content: "noindex" }],
+  }),
+  component: ReportsPage,
+});
+function ReportsPage() {
+  const [kind, setKind] = useState<ReportKind>("students");
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [role, setRole] = useState("");
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [className, setClassName] = useState("");
+  const [stream, setStream] = useState("");
+  const [term, setTerm] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [examId, setExamId] = useState("");
+  const [rows, setRows] = useState<DataRow[]>([]);
+  const [ranked, setRanked] = useState<Ranked | null>(null);
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(0);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void Promise.all([neonApi("/api/me"), neonApi("/api/classes")])
+      .then(async ([mr, cr]) => {
+        const me = await mr.json();
+        setRole(me.role || "");
+        setPermissions(me.permissions || []);
+        setClasses(await cr.json());
+        if (me.school?.academicYear)
+          setTerm(`${me.school.activeTerm || "Term 1"} ${me.school.academicYear}`);
+        if (me.role === "Admin")
+          void neonApi("/api/exams")
+            .then((r) => r.json())
+            .then((list: Exam[]) => {
+              setExams(list);
+              setExamId(list[0]?.id || "");
+            });
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load report filters."));
+  }, []);
+  const selected = classes.find((c) => c.name === className);
+  const can = (p: string) => role === "Admin" || permissions.includes(p);
+  async function run() {
+    setBusy(true);
+    setError("");
+    setRows([]);
+    setRanked(null);
+    setPage(0);
+    try {
+      if (kind === "ranked") {
+        if (!examId) throw new Error("Select an exam.");
+        const r = await neonApi(`/api/exams/${examId}/report`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Could not load ranked report.");
+        setRanked(d);
+        return;
+      }
+      const params = new URLSearchParams({
+        class: className,
+        stream,
+        ...(kind === "fees" ? { term } : {}),
+        ...(kind === "attendance" ? { date } : {}),
+      });
+      const r = await neonApi(`/api/reports/${kind}?${params}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Could not load report.");
+      setRows(d);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load report.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const columns = useMemo(() => {
+    if (kind === "students")
+      return [
+        ["adm", "Admission"],
+        ["first", "First name"],
+        ["last", "Last name"],
+        ["gender", "Gender"],
+        ["class", "Class"],
+        ["stream", "Stream"],
+        ["guardian", "Parent / guardian"],
+        ["phone", "Phone"],
+        ["status", "Status"],
+      ];
+    if (kind === "fees")
+      return [
+        ["adm", "Admission"],
+        ["first", "First name"],
+        ["last", "Last name"],
+        ["class", "Class"],
+        ["stream", "Stream"],
+        ["billed", "Billed"],
+        ["paid", "Paid"],
+        ["balance", "Balance"],
+      ];
+    return [
+      ["adm", "Admission"],
+      ["first", "First name"],
+      ["last", "Last name"],
+      ["class", "Class"],
+      ["stream", "Stream"],
+      ["status", "Attendance"],
+    ];
+  }, [kind]);
+  const source = kind === "ranked" ? ranked?.students || [] : rows;
+  const filtered = source.filter((r) => JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+  const pageSize = 50;
+  const visible = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  const feeSum = (key: string) => rows.reduce((sum, r) => sum + Number(r[key] || 0), 0);
+  const statusCount = (s: string) => rows.filter((r) => r.status === s).length;
+  const tabs: [ReportKind, string, string][] = [
+    ["students", "Student list", "view_students"],
+    ["fees", "Fee and balance", "view_fees"],
+    ["attendance", "Attendance", "view_attendance"],
+    ["ranked", "Ranked exam", "view_exams"],
+  ];
+  const enabled = tabs.filter(
+    ([reportKind, , permission]) =>
+      can(permission) && (reportKind !== "ranked" || role === "Admin"),
+  );
+  return (
+    <PortalShell
+      eyebrow="Administration"
+      title="Reports"
+      actions={
+        <button
+          className={`${btn("ghost")} print:hidden`}
+          onClick={() => window.print()}
+          disabled={!source.length}
+        >
+          Print report
+        </button>
+      }
+    >
+      <p className="mb-5 max-w-3xl text-sm text-ink-soft">
+        Build searchable reports from current school records. Select filters, then generate or print
+        the report.
+      </p>
+      {error && (
+        <p role="alert" className="mb-4 text-sm text-owed">
+          {error}
+        </p>
+      )}
+      <div className="mb-5 flex flex-wrap gap-2 print:hidden">
+        {enabled.map(([value, label]) => (
+          <button
+            key={value}
+            className={btn(kind === value ? "primary" : "ghost")}
+            onClick={() => {
+              setKind(value);
+              setRows([]);
+              setRanked(null);
+              setError("");
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="mb-5 grid gap-3 border border-ink/10 bg-paper p-4 sm:grid-cols-2 lg:grid-cols-4 print:hidden">
+        {kind !== "ranked" && (
+          <label className="text-sm">
+            Class
+            <select
+              className={inputCls}
+              value={className}
+              onChange={(e) => {
+                setClassName(e.target.value);
+                setStream("");
+              }}
+            >
+              <option value="">All classes</option>
+              {classes.map((c) => (
+                <option key={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {kind !== "ranked" && (
+          <label className="text-sm">
+            Stream
+            <select
+              className={inputCls}
+              disabled={!className}
+              value={stream}
+              onChange={(e) => setStream(e.target.value)}
+            >
+              <option value="">All streams</option>
+              {(selected?.streams || []).map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {kind === "fees" && (
+          <label className="text-sm">
+            Term / academic year
+            <input
+              className={inputCls}
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              placeholder="All terms, e.g. Term 1 2027"
+            />
+          </label>
+        )}
+        {kind === "attendance" && (
+          <label className="text-sm">
+            Date
+            <input
+              type="date"
+              className={inputCls}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </label>
+        )}
+        {kind === "ranked" && (
+          <label className="text-sm">
+            Exam
+            <select className={inputCls} value={examId} onChange={(e) => setExamId(e.target.value)}>
+              <option value="">Select exam</option>
+              {exams.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name} - {e.className} {e.stream} / {e.term} {e.academicYear}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div className="flex items-end">
+          <button className={btn()} disabled={busy} onClick={() => void run()}>
+            {busy ? "Generating..." : "Generate report"}
+          </button>
+        </div>
+      </div>
+      {kind === "fees" && rows.length > 0 && (
+        <div className="mb-4 grid gap-3 sm:grid-cols-3 print:grid-cols-3">
+          {[
+            ["Billed", feeSum("billed")],
+            ["Paid", feeSum("paid")],
+            ["Outstanding", feeSum("balance")],
+          ].map(([label, value]) => (
+            <div key={label} className="border border-ink/10 bg-paper p-4">
+              <div className="eyebrow text-[10px] text-ink-soft">{label}</div>
+              <div className="font-display text-xl">KES {Number(value).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {kind === "attendance" && rows.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-4 text-sm print:hidden">
+          {["Present", "Absent", "Late", "Excused", "Not marked"].map((s) => (
+            <span key={s}>
+              {s}: <strong>{statusCount(s)}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+      {ranked && (
+        <div className="mb-4 hidden print:block">
+          <h2 className="font-display text-xl">
+            {ranked.schoolName} - {ranked.name}
+          </h2>
+          <p>
+            {ranked.className} {ranked.stream} - {ranked.term} {ranked.academicYear}
+          </p>
+        </div>
+      )}
+      {(rows.length > 0 || ranked) && (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-3 print:hidden">
+            <input
+              className={`${inputCls} max-w-sm`}
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(0);
+              }}
+              placeholder="Search this report"
+            />
+            <span className="text-sm text-ink-soft">{filtered.length} records</span>
+          </div>
+          <div className="overflow-x-auto border border-ink/10 bg-paper">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr>
+                  {kind === "ranked"
+                    ? [
+                        "Position",
+                        "Student",
+                        "Admission",
+                        "Stream",
+                        ...(ranked?.subjects || []),
+                        "Total",
+                      ].map((x) => (
+                        <th key={x} className={thCls}>
+                          {x}
+                        </th>
+                      ))
+                    : columns.map(([key, label]) => (
+                        <th key={key} className={thCls}>
+                          {label}
+                        </th>
+                      ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((r, i) => (
+                  <tr key={String(r.id || `${r.adm}-${i}`)}>
+                    {kind === "ranked" ? (
+                      <>
+                        <td className={tdCls}>{String(r.position)}</td>
+                        <td className={tdCls}>{String(r.name)}</td>
+                        <td className={tdCls}>{String(r.adm)}</td>
+                        <td className={tdCls}>{String(r.stream)}</td>
+                        {(ranked?.subjects || []).map((sub) => (
+                          <td key={sub} className={tdCls}>
+                            {String((r.marks as Record<string, unknown>)?.[sub] ?? "-")}
+                          </td>
+                        ))}
+                        <td className={`${tdCls} font-semibold`}>
+                          {Number(r.total || 0).toFixed(1)}
+                        </td>
+                      </>
+                    ) : (
+                      columns.map(([key = ""]) => (
+                        <td key={key} className={tdCls}>
+                          {["billed", "paid", "balance"].includes(key)
+                            ? `KES ${Number(r[key] || 0).toLocaleString()}`
+                            : String(r[key] ?? "")}
+                        </td>
+                      ))
+                    )}
+                  </tr>
+                ))}
+                {!visible.length && (
+                  <tr>
+                    <td
+                      colSpan={
+                        kind === "ranked" ? (ranked?.subjects.length || 0) + 5 : columns.length
+                      }
+                      className="px-4 py-8 text-center text-ink-soft"
+                    >
+                      No records match this report.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 flex gap-2 print:hidden">
+            <button
+              className={btn("ghost")}
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              Previous
+            </button>
+            <span className="self-center text-sm">
+              Page {page + 1} of {Math.max(1, Math.ceil(filtered.length / pageSize))}
+            </span>
+            <button
+              className={btn("ghost")}
+              disabled={(page + 1) * pageSize >= filtered.length}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </>
+      )}
+    </PortalShell>
+  );
 }

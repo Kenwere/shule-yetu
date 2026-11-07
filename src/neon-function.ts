@@ -27,15 +27,21 @@ attachDatabasePool(pool);
 
 const authOrigin = new URL(authUrl).origin;
 const jwks = createRemoteJWKSet(new URL(jwksUrl));
-const realtime = createRealtime({ secret: realtimeSecret, db: new URL(databaseUrl).pathname.slice(1) });
+const realtime = createRealtime({
+  secret: realtimeSecret,
+  db: new URL(databaseUrl).pathname.slice(1),
+});
 const s3 = new S3Client({ forcePathStyle: true });
 const app = new Hono<Env>();
 
-app.use("*", cors({
-  origin: "*",
-  allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowHeaders: ["Authorization", "Content-Type", "X-File-Name"],
-}));
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Authorization", "Content-Type", "X-File-Name"],
+  }),
+);
 
 app.get("/health", async (c) => {
   try {
@@ -47,13 +53,21 @@ app.get("/health", async (c) => {
   }
 });
 
-async function requireUser(request: Request): Promise<{ id: string; email: string; name: string } | null> {
+async function requireUser(
+  request: Request,
+): Promise<{ id: string; email: string; name: string } | null> {
   const header = request.headers.get("Authorization");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, jwks, { issuer: authOrigin, audience: authOrigin });
-    return typeof payload.sub === "string" ? { id: payload.sub, email: typeof payload.email === "string" ? payload.email : "", name: typeof payload.name === "string" ? payload.name : "" } : null;
+    return typeof payload.sub === "string"
+      ? {
+          id: payload.sub,
+          email: typeof payload.email === "string" ? payload.email : "",
+          name: typeof payload.name === "string" ? payload.name : "",
+        }
+      : null;
   } catch {
     return null;
   }
@@ -65,15 +79,17 @@ app.use("/api/*", async (c, next) => {
   c.set("userId", user.id);
   c.set("userEmail", user.email);
   c.set("userName", user.name);
-  await next();
+  return await next();
 });
 
 mountSchoolApi(app, pool);
 
 app.post("/internal/cleanup-announcements", async (c) => {
   const parsed = await parseTriggerDelivery(c.req.raw);
-  if (!parsed.ok) return c.json({ error: parsed.error }, parsed.error === "invalid_body" ? 400 : 401);
-  if (parsed.invocation.type !== "schedule") return c.json({ error: "Schedule trigger required." }, 400);
+  if (!parsed.ok)
+    return c.json({ error: parsed.error }, parsed.error === "invalid_body" ? 400 : 401);
+  if (parsed.invocation.type !== "schedule")
+    return c.json({ error: "Schedule trigger required." }, 400);
   const result = await pool.query("DELETE FROM school_announcements WHERE expires_at <= now()");
   return c.json({ deleted: result.rowCount ?? 0 });
 });
@@ -88,10 +104,15 @@ app.get("/api/notes", async (c) => {
 
 app.post("/api/notes", async (c) => {
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Expected a JSON body." }, 400); }
-  const text = typeof body === "object" && body !== null && "text" in body
-    ? (body as { text?: unknown }).text
-    : undefined;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Expected a JSON body." }, 400);
+  }
+  const text =
+    typeof body === "object" && body !== null && "text" in body
+      ? (body as { text?: unknown }).text
+      : undefined;
   if (typeof text !== "string" || !text.trim() || text.length > 500) {
     return c.json({ error: "A note from 1 to 500 characters is required." }, 400);
   }
@@ -112,16 +133,32 @@ app.get("/api/school-profile", async (c) => {
 
 app.post("/api/school-profile", async (c) => {
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Expected a JSON body." }, 400); }
-  if (typeof body !== "object" || body === null) return c.json({ error: "Invalid school profile." }, 400);
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Expected a JSON body." }, 400);
+  }
+  if (typeof body !== "object" || body === null)
+    return c.json({ error: "Invalid school profile." }, 400);
   const input = body as Record<string, unknown>;
-  const fields = ["schoolName", "schoolType", "email", "phone", "address", "website", "motto"] as const;
-  if (fields.some((field) => typeof input[field] !== "string")) return c.json({ error: "All school profile fields must be strings." }, 400);
+  const fields = [
+    "schoolName",
+    "schoolType",
+    "email",
+    "phone",
+    "address",
+    "website",
+    "motto",
+  ] as const;
+  if (fields.some((field) => typeof input[field] !== "string"))
+    return c.json({ error: "All school profile fields must be strings." }, 400);
   const schoolName = (input.schoolName as string).trim();
-  if (!schoolName || schoolName.length > 160) return c.json({ error: "School name must be between 1 and 160 characters." }, 400);
+  if (!schoolName || schoolName.length > 160)
+    return c.json({ error: "School name must be between 1 and 160 characters." }, 400);
   const values = fields.slice(1).map((field) => (input[field] as string).trim());
   const limits = [80, 254, 50, 300, 300, 200];
-  if (values.some((value, index) => value.length > limits[index])) return c.json({ error: "One or more school details are too long." }, 400);
+  if (values.some((value, index) => value.length > (limits[index] ?? Number.POSITIVE_INFINITY)))
+    return c.json({ error: "One or more school details are too long." }, 400);
   const result = await pool.query(
     `INSERT INTO school_profiles (user_id, school_name, school_type, contact_email, phone, address, website, motto)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -145,17 +182,25 @@ app.post("/api/files", async (c) => {
   const size = Number(c.req.header("Content-Length") || 0);
   if (size > 10 * 1024 * 1024) return c.json({ error: "Files must be 10 MB or smaller." }, 413);
   const rawName = c.req.header("X-File-Name") || "upload.bin";
-  const filename = decodeURIComponent(rawName).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "upload.bin";
+  const filename =
+    decodeURIComponent(rawName)
+      .replace(/[^a-zA-Z0-9._-]/g, "_")
+      .slice(0, 100) || "upload.bin";
   const key = c.get("userId") + "/" + randomUUID() + "-" + filename;
   const bytes = new Uint8Array(await c.req.arrayBuffer());
-  if (bytes.byteLength > 10 * 1024 * 1024) return c.json({ error: "Files must be 10 MB or smaller." }, 413);
-  await s3.send(new PutObjectCommand({
-    Bucket: "assets",
-    Key: key,
-    Body: bytes,
-    ContentType: c.req.header("Content-Type") || "application/octet-stream",
-  }));
-  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: "assets", Key: key }), { expiresIn: 600 });
+  if (bytes.byteLength > 10 * 1024 * 1024)
+    return c.json({ error: "Files must be 10 MB or smaller." }, 413);
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: "assets",
+      Key: key,
+      Body: bytes,
+      ContentType: c.req.header("Content-Type") || "application/octet-stream",
+    }),
+  );
+  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: "assets", Key: key }), {
+    expiresIn: 600,
+  });
   return c.json({ key, filename, url });
 });
 

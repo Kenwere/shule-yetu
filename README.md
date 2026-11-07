@@ -36,4 +36,3 @@ Configure these values in .env.local before deploying the Neon Function:
 - SHULE_YETU_APP_URL: your deployed app origin, such as https://shule-yetu-two.vercel.app
 
 Verify the sender domain in Resend first. These are server-side Neon Function settings; do not prefix them with VITE_ or add the Resend API key to browser code. Deploy them with neon deploy --env .env.local. If email settings are missing or Resend rejects the message, the invitation is still created and the admin can copy the link.
-

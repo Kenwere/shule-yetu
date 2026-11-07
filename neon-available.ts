@@ -3,7 +3,8 @@ import { defineConfig } from "@neon/config/v1";
 export default defineConfig({
   preview: { realtime: { allowedOrigins: ["http://localhost:5173", "http://127.0.0.1:5173"] } },
   auth: true,
-  functions: { hello: {
+  functions: {
+    hello: {
       name: "Hello World",
       source: "./src/neon-function.ts",
       env: {
@@ -15,6 +16,7 @@ export default defineConfig({
         AWS_ENDPOINT_URL_S3: process.env.AWS_ENDPOINT_URL_S3,
         AWS_REGION: process.env.AWS_REGION,
       },
-    } },
+    },
+  },
   buckets: { assets: { access: "private" } },
 });

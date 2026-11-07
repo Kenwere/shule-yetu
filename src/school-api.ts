@@ -845,7 +845,12 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       ? b.permissions.filter((p): p is Permission => allPermissions.includes(p as Permission))
       : rolePermissions[role];
     const shouldSendEmail = b.sendEmail === true;
-    const configuredUrl = String(process.env.SHULE_YETU_APP_URL || c.req.header("Origin") || "");
+    const configuredUrl = String(
+      (typeof b.appOrigin === "string" && b.appOrigin) ||
+        c.req.header("Origin") ||
+        process.env.SHULE_YETU_APP_URL ||
+        "",
+    );
     let appOrigin = "";
     try {
       const parsed = new URL(configuredUrl);
@@ -1074,6 +1079,14 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     } finally {
       client.release();
     }
+  });
+  app.get("/api/staff/invitation/:code", async (c) => {
+    const result = await pool.query(
+      `SELECT i.email,i.full_name AS name,i.role,p.school_name AS "schoolName" FROM school_invites i JOIN school_profiles p ON p.user_id=i.school_owner_id WHERE i.invite_code=$1 AND i.expires_at>now()`,
+      [c.req.param("code")],
+    );
+    if (!result.rowCount) return c.json({ error: "This invitation is invalid or has expired." }, 404);
+    return c.json(result.rows[0]);
   });
   app.get("/api/classes", async (c) => {
     const x = await contextFor(c);
@@ -1376,6 +1389,17 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     );
     return c.json({ id }, 201);
   });
+  app.delete("/api/exams/:id", async (c) => {
+    const x = await guard(c, "edit_exams");
+    if (!x) return c.json({ error: "Not allowed to delete exams." }, 403);
+    if (x.role !== "Admin") return c.json({ error: "Only administrators can delete exams." }, 403);
+    const result = await pool.query(
+      "DELETE FROM school_exams WHERE id=$1 AND school_owner_id=$2 RETURNING id",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (!result.rowCount) return c.json({ error: "Exam not found." }, 404);
+    return c.json({ ok: true });
+  });
   app.get("/api/exams/:id/marks", async (c) => {
     const x = await guard(c, "view_exams");
     if (!x) return c.json({ error: "Not allowed." }, 403);
@@ -1448,18 +1472,29 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     if (x.role !== "Admin")
       return c.json({ error: "Only administrators can view ranked reports." }, 403);
     const meta = await pool.query(
-      `SELECT e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",p.school_name AS "schoolName",cl.subjects FROM school_exams e JOIN school_profiles p ON p.user_id=e.school_owner_id JOIN school_classes cl ON cl.school_owner_id=e.school_owner_id AND cl.name=e.class_name WHERE e.id=$1 AND e.school_owner_id=$2`,
+      `SELECT e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",p.school_name AS "schoolName",p.motto,p.contact_email AS "schoolEmail",p.phone AS "schoolPhone",p.address AS "schoolAddress",p.logo_key AS "logoKey",cl.subjects FROM school_exams e JOIN school_profiles p ON p.user_id=e.school_owner_id JOIN school_classes cl ON cl.school_owner_id=e.school_owner_id AND cl.name=e.class_name WHERE e.id=$1 AND e.school_owner_id=$2`,
       [c.req.param("id"), x.schoolId],
     );
     if (!meta.rowCount) return c.json({ error: "Exam not found." }, 404);
     const students = await pool.query(
-      `WITH totals AS (SELECT s.id,s.admission_no AS adm,s.first_name||' '||s.last_name AS name,s.stream,COALESCE(sum(m.score) FILTER(WHERE m.status='Approved'),0) AS total,COALESCE(jsonb_object_agg(m.subject,m.score) FILTER(WHERE m.status='Approved'), '{}'::jsonb) AS marks FROM school_exams e JOIN school_students s ON s.school_owner_id=e.school_owner_id AND s.class_name=e.class_name AND (e.stream='*' OR s.stream=e.stream) AND s.status='Active' LEFT JOIN school_marks m ON m.exam_id=e.id AND m.student_id=s.id AND m.status='Approved' WHERE e.id=$1 AND e.school_owner_id=$2 GROUP BY s.id) SELECT *,DENSE_RANK() OVER(ORDER BY total DESC) AS position FROM totals ORDER BY position,name`,
+      `WITH totals AS (SELECT s.id,s.admission_no AS adm,s.first_name||' '||s.last_name AS name,s.first_name AS first,s.last_name AS last,s.gender,s.date_of_birth AS dob,s.guardian,s.phone,s.class_name AS class,s.stream,s.photo_key AS "photoKey",(SELECT count(*) FROM school_attendance a WHERE a.student_id=s.id AND a.school_owner_id=s.school_owner_id AND a.status='Present') AS "attendancePresent",(SELECT count(*) FROM school_attendance a WHERE a.student_id=s.id AND a.school_owner_id=s.school_owner_id AND a.status='Absent') AS "attendanceAbsent",(SELECT count(*) FROM school_attendance a WHERE a.student_id=s.id AND a.school_owner_id=s.school_owner_id AND a.status='Late') AS "attendanceLate",COALESCE(sum(m.score) FILTER(WHERE m.status='Approved'),0) AS total,COALESCE(jsonb_object_agg(m.subject,m.score) FILTER(WHERE m.status='Approved'), '{}'::jsonb) AS marks FROM school_exams e JOIN school_students s ON s.school_owner_id=e.school_owner_id AND s.class_name=e.class_name AND (e.stream='*' OR s.stream=e.stream) AND s.status='Active' LEFT JOIN school_marks m ON m.exam_id=e.id AND m.student_id=s.id AND m.status='Approved' WHERE e.id=$1 AND e.school_owner_id=$2 GROUP BY s.id) SELECT *,DENSE_RANK() OVER(ORDER BY total DESC) AS position,count(*) OVER() AS "classSize" FROM totals ORDER BY position,name`,
       [c.req.param("id"), x.schoolId],
     );
+    const logoUrl = meta.rows[0].logoKey
+      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: meta.rows[0].logoKey }), { expiresIn: 3600 })
+      : "";
+    const cardStudents = await Promise.all(students.rows.map(async (student) => {
+      const photoUrl = student.photoKey
+        ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: student.photoKey }), { expiresIn: 3600 })
+        : "";
+      const { photoKey, ...details } = student;
+      return { ...details, photoUrl };
+    }));
     return c.json({
       ...meta.rows[0],
+      logoUrl,
       subjects: meta.rows[0].subjects || [],
-      students: students.rows,
+      students: cardStudents,
     });
   });
   app.get("/api/students/:id/report-card", async (c) => {
@@ -1468,10 +1503,20 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     if (x.role !== "Admin")
       return c.json({ error: "Only administrators can print report cards." }, 403);
     const student = await pool.query(
-      `SELECT s.id,s.admission_no AS adm,s.first_name AS first,s.last_name AS last,s.class_name AS "class",s.stream,p.school_name AS "schoolName" FROM school_students s JOIN school_profiles p ON p.user_id=s.school_owner_id WHERE s.id=$1 AND s.school_owner_id=$2`,
+      `SELECT s.id,s.admission_no AS adm,s.first_name AS first,s.last_name AS last,s.gender,s.date_of_birth AS dob,s.class_name AS "class",s.stream,s.guardian,s.phone,s.address,s.admitted_on AS admitted,s.photo_key AS "photoKey",p.school_name AS "schoolName",p.motto,p.contact_email AS "schoolEmail",p.phone AS "schoolPhone",p.address AS "schoolAddress",p.logo_key AS "logoKey" FROM school_students s JOIN school_profiles p ON p.user_id=s.school_owner_id WHERE s.id=$1 AND s.school_owner_id=$2`,
       [c.req.param("id"), x.schoolId],
     );
     if (!student.rowCount) return c.json({ error: "Student not found." }, 404);
+    const photoUrl = student.rows[0].photoKey
+      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: student.rows[0].photoKey }), { expiresIn: 3600 })
+      : "";
+    const logoUrl = student.rows[0].logoKey
+      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: student.rows[0].logoKey }), { expiresIn: 3600 })
+      : "";
+    const attendance = await pool.query(
+      `SELECT count(*) FILTER(WHERE status='Present') AS present,count(*) FILTER(WHERE status='Absent') AS absent,count(*) FILTER(WHERE status='Late') AS late FROM school_attendance WHERE student_id=$1 AND school_owner_id=$2`,
+      [c.req.param("id"), x.schoolId],
+    );
     const rows = await pool.query(
       `SELECT e.id,e.name AS exam,e.term,e.academic_year AS "academicYear",m.subject,m.score FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' ORDER BY e.academic_year,e.created_at,m.subject`,
       [c.req.param("id"), x.schoolId],
@@ -1484,6 +1529,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       marks: { subject: string; score: number }[];
       total: number;
       position: number;
+      classSize: number;
     };
     const exams = new Map<string, StudentExam>();
     for (const r of rows.rows) {
@@ -1497,6 +1543,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
           marks: [],
           total: 0,
           position: 0,
+          classSize: 0,
         });
       const exam = exams.get(id);
       if (!exam) continue;
@@ -1505,28 +1552,35 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     }
     for (const e of exams.values()) {
       const rank = await pool.query(
-        `WITH totals AS (SELECT s.id,COALESCE(sum(m.score) FILTER(WHERE m.status='Approved'),0) AS total FROM school_exams ex JOIN school_students s ON s.school_owner_id=ex.school_owner_id AND s.class_name=ex.class_name AND (ex.stream='*' OR s.stream=ex.stream) AND s.status='Active' LEFT JOIN school_marks m ON m.exam_id=ex.id AND m.student_id=s.id WHERE ex.id=$1 AND ex.school_owner_id=$2 GROUP BY s.id) SELECT DENSE_RANK() OVER(ORDER BY total DESC) AS position FROM totals WHERE id=$3`,
+        `WITH totals AS (SELECT s.id,COALESCE(sum(m.score) FILTER(WHERE m.status='Approved'),0) AS total FROM school_exams ex JOIN school_students s ON s.school_owner_id=ex.school_owner_id AND s.class_name=ex.class_name AND (ex.stream='*' OR s.stream=ex.stream) AND s.status='Active' LEFT JOIN school_marks m ON m.exam_id=ex.id AND m.student_id=s.id WHERE ex.id=$1 AND ex.school_owner_id=$2 GROUP BY s.id), ranked AS (SELECT DENSE_RANK() OVER(ORDER BY total DESC) AS position,count(*) OVER() AS "classSize",id FROM totals) SELECT position,"classSize" FROM ranked WHERE id=$3`,
         [e.id, x.schoolId, c.req.param("id")],
       );
       e.position = Number(rank.rows[0]?.position || 0);
+      e.classSize = Number(rank.rows[0]?.classSize || 0);
     }
     const terms = await pool.query(
       `SELECT e.term,e.academic_year AS "academicYear",sum(m.score) AS total FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' GROUP BY e.term,e.academic_year ORDER BY e.academic_year,e.term`,
       [c.req.param("id"), x.schoolId],
     );
-    return c.json(
-      [...exams.values()].flatMap((e) =>
+    const cardStudent = { ...student.rows[0], photoUrl, logoUrl };
+    delete (cardStudent as Record<string, unknown>).photoKey;
+    delete (cardStudent as Record<string, unknown>).logoKey;
+    return c.json({
+      student: cardStudent,
+      attendance: attendance.rows[0],
+      marks: [...exams.values()].flatMap((e) =>
         e.marks.map((m) => ({
           ...m,
           exam: e.exam,
           term: e.term,
           academicYear: e.academicYear,
           position: e.position,
+          classSize: e.classSize,
           total: e.total,
           schoolName: student.rows[0].schoolName,
         })),
       ),
-    );
+    });
   });
   app.get("/api/events", async (c) => {
     const x = await guard(c, "view_announcements");
@@ -2080,8 +2134,9 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         (SELECT count(*) FROM school_lms_assessment_questions aq WHERE aq.assessment_id=a.id) AS "questionCount",
         (SELECT COALESCE(sum(q.marks),0) FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=a.id) AS "maxMarks",
         (SELECT count(*) FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid) AS "attemptsUsed",
-        (SELECT count(*) FROM school_lms_attempts at WHERE at.assessment_id=a.id) AS "attemptCount",
-        (SELECT count(*) FROM school_lms_attempts at JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=a.id AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL) AS "pendingReviewCount",
+        (SELECT count(*)::int FROM school_lms_attempts at WHERE at.assessment_id=a.id) AS "attemptCount",
+        (SELECT count(*)::int FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.status='in_progress') AS "openAttemptCount",
+        (SELECT count(*)::int FROM school_lms_attempts at JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=a.id AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL) AS "pendingReviewCount",
         CASE WHEN a.results_released AND $2='Student' THEN (SELECT at.score FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid AND at.status IN ('submitted','marked') ORDER BY at.attempt_number DESC LIMIT 1) ELSE NULL END AS "releasedScore"
        FROM school_lms_assessments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
        WHERE a.school_owner_id=$1 AND ($2='Admin' OR ($2='Student' AND a.publication_status='published' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND s.stream=a.stream OR s.id=$4::uuid AND a.stream='*' AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND cl.subjects ? a.subject)) OR ($2='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments ta WHERE ta.school_owner_id=a.school_owner_id AND ta.user_id=$3 AND ta.class_id=a.class_id AND (a.stream='*' OR ta.stream=a.stream) AND ta.subjects ? a.subject)))
@@ -2197,8 +2252,18 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       ))
     )
       return c.json({ error: "Assessment not found or outside your permissions." }, 404);
-    const unfinished=await pool.query(`SELECT count(*)::int AS count FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE a.id=$1 AND at.status='in_progress' OR a.id=$1 AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL`,[c.req.param("id")]);
-    if(Number(unfinished.rows[0]?.count||0)>0) return c.json({error:"Submit all open attempts and mark every essay and matching response before releasing results."},409);
+    const unfinished = await pool.query(
+      `SELECT count(*)::int AS count FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE a.id=$1 AND (at.status='in_progress' OR (at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL))`,
+      [c.req.param("id")],
+    );
+    if (Number(unfinished.rows[0]?.count || 0) > 0)
+      return c.json(
+        {
+          error:
+            "Submit all open attempts and mark every essay and matching response before releasing results.",
+        },
+        409,
+      );
     await pool.query(
       "UPDATE school_lms_assessments SET results_released=true WHERE id=$1 AND school_owner_id=$2",
       [c.req.param("id"), context.schoolId],
@@ -2207,29 +2272,116 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
   });
 
   app.get("/api/lms/assessments/:id/attempts", async (c) => {
-    const context=await guard(c,"manage_lms");
-    if(!context) return c.json({error:"Not allowed to review assessment attempts."},403);
-    const assessment=await pool.query("SELECT class_id,subject,stream FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2",[c.req.param("id"),context.schoolId]);
-    if(!assessment.rowCount || !(await canManageLearning(context,c.get("userId"),assessment.rows[0].class_id,assessment.rows[0].subject,assessment.rows[0].stream))) return c.json({error:"Assessment not found or outside your permissions."},404);
-    const rows=await pool.query(`SELECT at.id,at.attempt_number AS "attemptNumber",at.status,at.score,at.submitted_at AS "submittedAt",s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",q.id AS "questionId",q.question_type AS type,q.prompt,q.answer_key AS "answerKey",q.explanation,q.marks,aa.answer,aa.marks_awarded AS "marksAwarded",aa.feedback FROM school_lms_attempts at JOIN school_students s ON s.id=at.student_id AND s.school_owner_id=at.school_owner_id LEFT JOIN school_lms_assessment_questions aq ON aq.assessment_id=at.assessment_id LEFT JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=$1 AND at.school_owner_id=$2 ORDER BY at.submitted_at DESC NULLS LAST,s.last_name,s.first_name,aq.position`,[c.req.param("id"),context.schoolId]);
-    const attempts=new Map<string,Record<string,unknown>>();
-    for(const row of rows.rows){let attempt=attempts.get(row.id);if(!attempt){attempt={id:row.id,attemptNumber:row.attemptNumber,status:row.status,score:row.score,submittedAt:row.submittedAt,admissionNo:row.admissionNo,studentName:`${row.firstName} ${row.lastName}`,questions:[]};attempts.set(row.id,attempt);} if(row.questionId)(attempt.questions as Record<string,unknown>[]).push({id:row.questionId,type:row.type,prompt:row.prompt,answer:row.answer,answerKey:row.answerKey,explanation:row.explanation,marks:row.marks,marksAwarded:row.marksAwarded,feedback:row.feedback});}
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to review assessment attempts." }, 403);
+    const assessment = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (
+      !assessment.rowCount ||
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        assessment.rows[0].class_id,
+        assessment.rows[0].subject,
+        assessment.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assessment not found or outside your permissions." }, 404);
+    const rows = await pool.query(
+      `SELECT at.id,at.attempt_number AS "attemptNumber",at.status,at.score,at.submitted_at AS "submittedAt",s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",q.id AS "questionId",q.question_type AS type,q.prompt,q.answer_key AS "answerKey",q.explanation,q.marks,aa.answer,aa.marks_awarded AS "marksAwarded",aa.feedback FROM school_lms_attempts at JOIN school_students s ON s.id=at.student_id AND s.school_owner_id=at.school_owner_id LEFT JOIN school_lms_assessment_questions aq ON aq.assessment_id=at.assessment_id LEFT JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=$1 AND at.school_owner_id=$2 ORDER BY at.submitted_at DESC NULLS LAST,s.last_name,s.first_name,aq.position`,
+      [c.req.param("id"), context.schoolId],
+    );
+    const attempts = new Map<string, Record<string, unknown>>();
+    for (const row of rows.rows) {
+      let attempt = attempts.get(row.id);
+      if (!attempt) {
+        attempt = {
+          id: row.id,
+          attemptNumber: row.attemptNumber,
+          status: row.status,
+          score: row.score,
+          submittedAt: row.submittedAt,
+          admissionNo: row.admissionNo,
+          studentName: `${row.firstName} ${row.lastName}`,
+          questions: [],
+        };
+        attempts.set(row.id, attempt);
+      }
+      if (row.questionId)
+        (attempt.questions as Record<string, unknown>[]).push({
+          id: row.questionId,
+          type: row.type,
+          prompt: row.prompt,
+          answer: row.answer,
+          answerKey: row.answerKey,
+          explanation: row.explanation,
+          marks: row.marks,
+          marksAwarded: row.marksAwarded,
+          feedback: row.feedback,
+        });
+    }
     return c.json([...attempts.values()]);
   });
 
   app.post("/api/lms/attempts/:attemptId/answers/:questionId/mark", async (c) => {
-    const context=await guard(c,"manage_lms");
-    if(!context) return c.json({error:"Not allowed to mark assessment answers."},403);
-    const match=await pool.query(`SELECT at.id,at.assessment_id,a.class_id,a.subject,a.stream,q.marks,q.question_type FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id AND a.school_owner_id=at.school_owner_id JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id AND aq.question_id=$3 JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE at.id=$1 AND at.school_owner_id=$2 AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching')`,[c.req.param("attemptId"),context.schoolId,c.req.param("questionId")]);
-    if(!match.rowCount || !(await canManageLearning(context,c.get("userId"),match.rows[0].class_id,match.rows[0].subject,match.rows[0].stream))) return c.json({error:"Submitted answer not found or outside your permissions."},404);
-    const body=(await c.req.json().catch(()=>null)) as Record<string,unknown>|null, marks=Number(body?.marks), feedback=String(body?.feedback||"").trim();
-    if(!Number.isFinite(marks)||marks<0||marks>Number(match.rows[0].marks)||feedback.length>5000) return c.json({error:"Enter marks from zero to the question maximum and feedback up to 5000 characters."},400);
-    const client=await pool.connect();
-    try{await client.query("BEGIN"); await client.query(`INSERT INTO school_lms_attempt_answers(attempt_id,question_id,answer,marks_awarded,feedback) VALUES($1,$2,'null'::jsonb,$3,$4) ON CONFLICT(attempt_id,question_id) DO UPDATE SET marks_awarded=EXCLUDED.marks_awarded,feedback=EXCLUDED.feedback,updated_at=now()`,[match.rows[0].id,c.req.param("questionId"),marks,feedback]);
-      const pending=await client.query(`SELECT count(*)::int AS n FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=$1 AND aa.question_id=q.id WHERE aq.assessment_id=$2 AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL`,[match.rows[0].id,match.rows[0].assessment_id]);
-      await client.query(`UPDATE school_lms_attempts SET score=(SELECT COALESCE(sum(marks_awarded),0) FROM school_lms_attempt_answers WHERE attempt_id=$1),status=CASE WHEN $2::int=0 THEN 'marked' ELSE 'submitted' END,marked_by=CASE WHEN $2::int=0 THEN $3 ELSE NULL END,marked_at=CASE WHEN $2::int=0 THEN now() ELSE NULL END WHERE id=$1`,[match.rows[0].id,pending.rows[0].n,c.get("userId")]);
-      await client.query("COMMIT"); return c.json({saved:true,fullyMarked:Number(pending.rows[0].n)===0});
-    }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to mark assessment answers." }, 403);
+    const match = await pool.query(
+      `SELECT at.id,at.assessment_id,a.class_id,a.subject,a.stream,q.marks,q.question_type FROM school_lms_attempts at JOIN school_lms_assessments a ON a.id=at.assessment_id AND a.school_owner_id=at.school_owner_id JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id AND aq.question_id=$3 JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE at.id=$1 AND at.school_owner_id=$2 AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching')`,
+      [c.req.param("attemptId"), context.schoolId, c.req.param("questionId")],
+    );
+    if (
+      !match.rowCount ||
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        match.rows[0].class_id,
+        match.rows[0].subject,
+        match.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Submitted answer not found or outside your permissions." }, 404);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null,
+      marks = Number(body?.marks),
+      feedback = String(body?.feedback || "").trim();
+    if (
+      !Number.isFinite(marks) ||
+      marks < 0 ||
+      marks > Number(match.rows[0].marks) ||
+      feedback.length > 5000
+    )
+      return c.json(
+        {
+          error:
+            "Enter marks from zero to the question maximum and feedback up to 5000 characters.",
+        },
+        400,
+      );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO school_lms_attempt_answers(attempt_id,question_id,answer,marks_awarded,feedback) VALUES($1,$2,'null'::jsonb,$3,$4) ON CONFLICT(attempt_id,question_id) DO UPDATE SET marks_awarded=EXCLUDED.marks_awarded,feedback=EXCLUDED.feedback,updated_at=now()`,
+        [match.rows[0].id, c.req.param("questionId"), marks, feedback],
+      );
+      const pending = await client.query(
+        `SELECT count(*)::int AS n FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=$1 AND aa.question_id=q.id WHERE aq.assessment_id=$2 AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL`,
+        [match.rows[0].id, match.rows[0].assessment_id],
+      );
+      await client.query(
+        `UPDATE school_lms_attempts SET score=(SELECT COALESCE(sum(marks_awarded),0) FROM school_lms_attempt_answers WHERE attempt_id=$1),status=CASE WHEN $2::int=0 THEN 'marked' ELSE 'submitted' END,marked_by=CASE WHEN $2::int=0 THEN $3 ELSE NULL END,marked_at=CASE WHEN $2::int=0 THEN now() ELSE NULL END WHERE id=$1`,
+        [match.rows[0].id, pending.rows[0].n, c.get("userId")],
+      );
+      await client.query("COMMIT");
+      return c.json({ saved: true, fullyMarked: Number(pending.rows[0].n) === 0 });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   });
 
   app.post("/api/lms/assessments/:id/start", async (c) => {
@@ -2359,7 +2511,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       }
       await client.query(
         `INSERT INTO school_lms_attempt_answers(attempt_id,question_id,answer) SELECT $1,aq.question_id,'null'::jsonb FROM school_lms_assessment_questions aq WHERE aq.assessment_id=$2 ON CONFLICT(attempt_id,question_id) DO NOTHING`,
-        [a.rows[0].id,a.rows[0].assessment_id],
+        [a.rows[0].id, a.rows[0].assessment_id],
       );
       await client.query(
         `UPDATE school_lms_attempt_answers aa SET marks_awarded=CASE WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') AND lower(btrim(COALESCE(aa.answer#>>'{}',''))) = lower(btrim(COALESCE(q.answer_key#>>'{}',''))) THEN q.marks WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') THEN 0 ELSE NULL END FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=$1 AND aa.attempt_id=$2 AND aa.question_id=q.id`,

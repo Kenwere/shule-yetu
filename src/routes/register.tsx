@@ -1,8 +1,8 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { AuthShell, Field, submitClass } from "@/components/AuthShell";
 import { authClient } from "@/lib/auth-client";
-import { neonApi } from "@/lib/neon-api";
+import { getStaffInvitation, neonApi } from "@/lib/neon-api";
 export const Route = createFileRoute("/register")({
   head: () => ({
     meta: [
@@ -15,6 +15,8 @@ export const Route = createFileRoute("/register")({
 function Register() {
   const navigate = useNavigate();
   const [inviteCode, setInviteCode] = useState("");
+  const [invitation, setInvitation] = useState<{ email: string; name: string; schoolName: string } | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,12 +31,29 @@ function Register() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    setInviteCode(new URLSearchParams(window.location.search).get("invite") || "");
+    const code = new URLSearchParams(window.location.search).get("invite") || "";
+    setInviteCode(code);
+    if (code) {
+      setInviteLoading(true);
+      void getStaffInvitation(code)
+        .then((details) => {
+          setInvitation({ email: details.email || "", name: details.name || "", schoolName: details.schoolName || "" });
+          setEmail(details.email || "");
+          setName(details.name || "");
+          setError("");
+        })
+        .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not verify invitation."))
+        .finally(() => setInviteLoading(false));
+    }
   }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
+      return;
+    }
+    if (inviteCode && (!invitation || email.trim().toLowerCase() !== invitation.email.toLowerCase())) {
+      setError("Use the email address this teacher invitation was sent to.");
       return;
     }
     setBusy(true);
@@ -46,6 +65,11 @@ function Register() {
         return;
       }
       if (inviteCode) {
+        const session = await authClient.getSession();
+        if (session.error || !session.data?.session?.token) {
+          setError("Your account was created. Sign in with this email to finish joining the school.");
+          return;
+        }
         await neonApi("/api/staff/accept-invite", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -79,6 +103,10 @@ function Register() {
       title={inviteCode ? "Staff registration" : "Register your school"}
     >
       <form onSubmit={submit}>
+        {inviteCode && invitation && (
+          <p className="mb-4 text-sm">You are joining <strong>{invitation.schoolName}</strong>. The invitation is for <strong>{invitation.email}</strong>.</p>
+        )}
+        {inviteCode && inviteLoading && <p className="mb-4 text-sm">Checking invitation…</p>}
         {!inviteCode && (
           <section className="mb-7 border-b border-ink/10 pb-6">
             <h2 className="eyebrow mb-4 text-ink-soft">School information</h2>
@@ -159,6 +187,7 @@ function Register() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            readOnly={Boolean(inviteCode && invitation)}
           />
           <Field
             label="Password"
@@ -184,14 +213,14 @@ function Register() {
             {error}
           </p>
         )}
-        <button className={submitClass} disabled={busy}>
+        <button className={submitClass} disabled={busy || inviteLoading || Boolean(inviteCode && !invitation)}>
           {busy ? "Creating account…" : inviteCode ? "Join school" : "Create school account"}
         </button>
         <p className="mt-2 text-sm">
           Already have an account?{" "}
-          <Link to="/login" className="font-semibold hover:text-gold">
+          <a href={inviteCode ? `/login?invite=${encodeURIComponent(inviteCode)}` : "/login"} className="font-semibold hover:text-gold">
             Login
-          </Link>
+          </a>
         </p>
       </form>
     </AuthShell>

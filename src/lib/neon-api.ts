@@ -4,6 +4,20 @@ const apiBase = import.meta.env.VITE_NEON_FUNCTION_HELLO_URL;
 const studentSessionKey = "shule-yetu-student-session";
 const parentSessionKey = "shule-yetu-parent-session";
 
+export async function getStaffInvitation(code: string) {
+  if (!apiBase) throw new Error("Neon Functions URL is not configured.");
+  const base = apiBase.endsWith("/") ? apiBase : `${apiBase}/`;
+  const response = await fetch(new URL(`api/staff/invitation/${encodeURIComponent(code)}`, base));
+  const result = (await response.json()) as {
+    email?: string;
+    name?: string;
+    schoolName?: string;
+    error?: string;
+  };
+  if (!response.ok) throw new Error(result.error || "This invitation is invalid or has expired.");
+  return result;
+}
+
 function getStudentToken() {
   return typeof window === "undefined"
     ? ""

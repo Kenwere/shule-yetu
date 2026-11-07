@@ -96,7 +96,14 @@ function TeachersPage() {
       const r = await neonApi("/api/staff/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, role, permissions: grants, sendEmail }),
+        body: JSON.stringify({
+          name,
+          email,
+          role,
+          permissions: grants,
+          sendEmail,
+          appOrigin: window.location.origin,
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Could not create invitation.");
@@ -106,15 +113,9 @@ function TeachersPage() {
           : typeof d.inviteCode === "string"
             ? d.inviteCode
             : "";
-      const link =
-        typeof d.inviteUrl === "string" && d.inviteUrl
-          ? d.inviteUrl
-          : code
-            ? new URL(
-                `/register?invite=${encodeURIComponent(code)}`,
-                window.location.origin,
-              ).toString()
-            : "";
+      const link = code
+        ? new URL(`/register?invite=${encodeURIComponent(code)}`, window.location.origin).toString()
+        : "";
       if (!link)
         throw new Error(
           "The invitation was created but the server did not return its link. Refresh the page and try again.",

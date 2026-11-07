@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Label, Panel, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
+import { StudentReportCard } from "@/components/StudentReportCard";
 import { neonApi } from "@/lib/neon-api";
 
 type Student = {
@@ -11,6 +12,11 @@ type Student = {
   last: string;
   class: string;
   stream: string;
+  gender?: string;
+  dob?: string;
+  guardian?: string;
+  phone?: string;
+  address?: string;
 };
 type Mark = {
   exam: string;
@@ -21,6 +27,16 @@ type Mark = {
   position: number;
   total: number;
   schoolName: string;
+  classSize: number;
+};
+type CardStudent = Student & {
+  schoolName: string;
+  motto?: string;
+  schoolEmail?: string;
+  schoolPhone?: string;
+  schoolAddress?: string;
+  photoUrl?: string;
+  logoUrl?: string;
 };
 type Exam = {
   id: string;
@@ -34,12 +50,30 @@ type Ranked = {
   id: string;
   adm: string;
   name: string;
+  first: string;
+  last: string;
+  gender?: string;
+  dob?: string;
+  guardian?: string;
+  phone?: string;
+  class: string;
+  stream: string;
+  photoUrl?: string;
+  attendancePresent: number;
+  attendanceAbsent: number;
+  attendanceLate: number;
   position: number;
+  classSize: number;
   total: number;
   marks: Record<string, number>;
 };
 type Report = {
   schoolName: string;
+  motto?: string;
+  schoolEmail?: string;
+  schoolPhone?: string;
+  schoolAddress?: string;
+  logoUrl?: string;
   name: string;
   className: string;
   stream: string;
@@ -65,9 +99,12 @@ function ReportCards() {
   const [examId, setExamId] = useState("");
   const [search, setSearch] = useState("");
   const [marks, setMarks] = useState<Mark[]>([]);
+  const [cardStudent, setCardStudent] = useState<CardStudent | null>(null);
+  const [attendance, setAttendance] = useState<{ present: number; absent: number; late: number }>({ present: 0, absent: 0, late: 0 });
   const [report, setReport] = useState<Report | null>(null);
   const [mode, setMode] = useState<"student" | "class">("student");
   const [remarks, setRemarks] = useState<Record<string, string>>({});
+  const [ratings, setRatings] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -95,7 +132,13 @@ function ReportCards() {
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || "Could not load card.");
-        setMarks(d);
+        setMarks(d.marks || []);
+        setCardStudent(d.student || null);
+        setAttendance({
+          present: Number(d.attendance?.present || 0),
+          absent: Number(d.attendance?.absent || 0),
+          late: Number(d.attendance?.late || 0),
+        });
       })
       .catch((e) => setError(e.message));
   }, [role, mode, studentId]);
@@ -223,163 +266,76 @@ function ReportCards() {
             </div>
           )}
           {mode === "student" && selected && (
-            <article className="report-card break-after-page border border-ink/15 bg-white p-6 text-ink">
-              <header className="border-b-2 border-ink pb-4 text-center">
-                {logoUrl && (
-                  <img
-                    src={logoUrl}
-                    alt="School logo"
-                    className="mx-auto mb-2 h-16 w-16 object-contain"
-                  />
-                )}
-                <h2 className="font-display text-2xl uppercase">
-                  {marks[0]?.schoolName || schoolName || "Shule Yetu"}
-                </h2>
-                <p className="eyebrow">Student report card</p>
-              </header>
-              <div className="grid gap-2 border-b py-4 sm:grid-cols-2">
-                <p>
-                  <b>Student:</b> {selected.first} {selected.last}
-                </p>
-                <p>
-                  <b>Admission:</b> {selected.adm}
-                </p>
-                <p>
-                  <b>Class:</b> {selected.class}
-                </p>
-                <p>
-                  <b>Stream:</b> {selected.stream || "—"}
-                </p>
-              </div>
-              {grouped.map(([term, rows]) => (
-                <section key={term} className="mt-5">
-                  <h3 className="font-display text-lg uppercase">{term}</h3>
-                  <p className="mb-2 text-sm">
-                    Position: {rows[0]?.position || "—"} · Total:{" "}
-                    {Number(rows[0]?.total || 0).toFixed(1)}
-                  </p>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        {["Exam", "Subject", "Approved score", "Grade"].map((h) => (
-                          <th className={thCls} key={h}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((m, i) => (
-                        <tr key={m.exam + m.subject + i}>
-                          <td className={tdCls}>{m.exam}</td>
-                          <td className={tdCls}>{m.subject}</td>
-                          <td className={tdCls}>{m.score}</td>
-                          <td className={tdCls}>{grade(Number(m.score))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="mt-3 flex gap-2 text-xs">
-                    Term total{" "}
-                    <div className="h-3 flex-1 bg-ink/10">
-                      <div
-                        className="h-full bg-gold"
-                        style={{
-                          width:
-                            Math.min(100, rows.reduce((sum, m) => sum + Number(m.score), 0) / 6) +
-                            "%",
-                        }}
-                      />
-                    </div>
-                    {rows.reduce((sum, m) => sum + Number(m.score), 0).toFixed(0)}
-                  </div>
-                </section>
-              ))}
-              <label className="mt-6 block text-sm font-semibold">
-                Teacher’s remarks
-                <textarea
-                  className="mt-2 min-h-16 w-full border p-2 print:hidden"
-                  value={remarks[selected.id] || ""}
-                  onChange={(e) => setRemarks({ ...remarks, [selected.id]: e.target.value })}
-                  placeholder="Enter remarks before printing"
-                />
-                <div className="hidden min-h-12 border-b print:block">{remarks[selected.id]}</div>
-              </label>
-            </article>
+            <StudentReportCard
+              student={selected}
+              schoolName={schoolName}
+              logoUrl={logoUrl}
+              detail={cardStudent}
+              marks={marks}
+              attendance={attendance}
+              remarks={remarks}
+              ratings={ratings}
+              onRemark={(key, value) => setRemarks((old) => ({ ...old, [key]: value }))}
+              onRating={(key, value) => setRatings((old) => ({ ...old, [key]: value }))}
+            />
           )}
           {mode === "class" && report && (
             <div className="space-y-5 print:space-y-0">
-              {report.students.map((s) => (
-                <article
-                  key={s.id}
-                  className="report-card break-after-page border border-ink/15 bg-white p-6 text-ink"
-                >
-                  <header className="border-b-2 border-ink pb-4 text-center">
-                    {logoUrl && (
-                      <img
-                        src={logoUrl}
-                        alt="School logo"
-                        className="mx-auto mb-2 h-16 w-16 object-contain"
-                      />
-                    )}
-                    <h2 className="font-display text-2xl uppercase">
-                      {report.schoolName || "Shule Yetu"}
-                    </h2>
-                    <p className="eyebrow">Student report card</p>
-                  </header>
-                  <div className="grid gap-2 border-b py-4 sm:grid-cols-2">
-                    <p>
-                      <b>Student:</b> {s.name}
-                    </p>
-                    <p>
-                      <b>Admission:</b> {s.adm}
-                    </p>
-                    <p>
-                      <b>Class:</b> {report.className}
-                    </p>
-                    <p>
-                      <b>Stream:</b> {report.stream}
-                    </p>
-                  </div>
-                  <h3 className="mt-5 font-display text-lg uppercase">
-                    {report.name} · {report.term} {report.academicYear}
-                  </h3>
-                  <p className="mb-2 text-sm">
-                    Position: {s.position} · Total: {Number(s.total).toFixed(1)}
-                  </p>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        {["Subject", "Approved score", "Grade"].map((h) => (
-                          <th className={thCls} key={h}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.subjects
-                        .filter((sub) => s.marks[sub] !== undefined)
-                        .map((sub) => (
-                          <tr key={sub}>
-                            <td className={tdCls}>{sub}</td>
-                            <td className={tdCls}>{s.marks[sub]}</td>
-                            <td className={tdCls}>{grade(Number(s.marks[sub]))}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                  <label className="mt-6 block text-sm font-semibold">
-                    Teacher’s remarks
-                    <textarea
-                      className="mt-2 min-h-16 w-full border p-2 print:hidden"
-                      value={remarks[s.id] || ""}
-                      onChange={(e) => setRemarks({ ...remarks, [s.id]: e.target.value })}
-                    />
-                    <div className="hidden min-h-12 border-b print:block">{remarks[s.id]}</div>
-                  </label>
-                </article>
-              ))}
+              {report.students.map((row) => {
+                const roster = students.find((student) => student.id === row.id);
+                const name = row.name.split(" ");
+                const student: Student = {
+                  id: row.id,
+                  adm: row.adm,
+                  first: row.first || roster?.first || name[0] || "",
+                  last: row.last || roster?.last || name.slice(1).join(" "),
+                  class: row.class || report.className,
+                  stream: row.stream,
+                  gender: row.gender || roster?.gender,
+                  dob: row.dob || roster?.dob,
+                  guardian: row.guardian || roster?.guardian,
+                  phone: row.phone || roster?.phone,
+                };
+                const cardDetail: CardStudent = {
+                  ...student,
+                  schoolName: report.schoolName,
+                  motto: report.motto,
+                  schoolEmail: report.schoolEmail,
+                  schoolPhone: report.schoolPhone,
+                  schoolAddress: report.schoolAddress,
+                  photoUrl: row.photoUrl,
+                  logoUrl: report.logoUrl,
+                };
+                const cardMarks: Mark[] = report.subjects.flatMap((subject) => {
+                  const score = row.marks[subject];
+                  return score === undefined ? [] : [{
+                    exam: report.name,
+                    term: report.term,
+                    academicYear: report.academicYear,
+                    subject,
+                    score,
+                    position: row.position,
+                    classSize: row.classSize,
+                    total: row.total,
+                    schoolName: report.schoolName,
+                  }];
+                });
+                return (
+                  <StudentReportCard
+                    key={row.id}
+                    student={student}
+                    schoolName={report.schoolName}
+                    logoUrl={report.logoUrl || logoUrl}
+                    detail={cardDetail}
+                    marks={cardMarks}
+                    attendance={{ present: Number(row.attendancePresent || 0), absent: Number(row.attendanceAbsent || 0), late: Number(row.attendanceLate || 0) }}
+                    remarks={remarks}
+                    ratings={ratings}
+                    onRemark={(key, value) => setRemarks((old) => ({ ...old, [key]: value }))}
+                    onRating={(key, value) => setRatings((old) => ({ ...old, [key]: value }))}
+                  />
+                );
+              })}
             </div>
           )}
         </>

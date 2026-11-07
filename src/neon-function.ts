@@ -74,7 +74,11 @@ async function requireUser(
 }
 
 app.use("/api/*", async (c, next) => {
-  if (c.req.path === "/api/lms/auth/login" || c.req.path === "/api/lms/parent/auth/login")
+  if (
+    c.req.path === "/api/lms/auth/login" ||
+    c.req.path === "/api/lms/parent/auth/login" ||
+    /^\/api\/staff\/invitation\/[^/]+$/.test(c.req.path)
+  )
     return await next();
   const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "") || "";
   if (bearer.startsWith("par.")) {

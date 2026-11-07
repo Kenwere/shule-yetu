@@ -56,7 +56,9 @@ function ExamsPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [report, setReport] = useState<Report | null>(null);
+  const [printCards, setPrintCards] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [savingMark, setSavingMark] = useState("");
   const marksPanelRef = useRef<HTMLElement | null>(null);
   const [draft, setDraft] = useState({
     name: "",
@@ -133,17 +135,23 @@ function ExamsPage() {
     }
   }
   async function update(mark: Mark, patch: Partial<Mark>) {
+    setSavingMark(mark.id);
     try {
       const r = await neonApi(`/api/marks/${mark.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({
+          score: patch.score ?? mark.score,
+          status: patch.status ?? mark.status,
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Could not save mark.");
       setMarks((rows) => rows.map((x) => (x.id === mark.id ? d : x)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save mark.");
+    } finally {
+      setSavingMark("");
     }
   }
   async function approveAll() {
@@ -176,6 +184,25 @@ function ExamsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load ranked report.");
     }
+  }
+  async function deleteExam(exam: Exam) {
+    if (!window.confirm(`Delete “${exam.name}” and all marks entered for it?`)) return;
+    setError("");
+    setMessage("");
+    try {
+      await neonApi(`/api/exams/${exam.id}`, { method: "DELETE" });
+      if (examId === exam.id) setExamId("");
+      if (report?.name === exam.name) setReport(null);
+      setMessage(`“${exam.name}” and its marks were deleted.`);
+      await loadExams();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete exam.");
+    }
+  }
+  function printExamCards() {
+    setPrintCards(true);
+    window.addEventListener("afterprint", () => setPrintCards(false), { once: true });
+    window.setTimeout(() => window.print(), 50);
   }
   const selected = exams.find((x) => x.id === examId);
   return (
@@ -221,9 +248,14 @@ function ExamsPage() {
                         Open
                       </button>{" "}
                       {role === "Admin" && (
-                        <button className={btn("ghost")} onClick={() => void viewReport(x.id)}>
-                          View report
-                        </button>
+                        <>
+                          <button className={btn("ghost")} onClick={() => void viewReport(x.id)}>
+                            View report
+                          </button>{" "}
+                          <button className={btn("bad")} onClick={() => void deleteExam(x)}>
+                            Delete
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -371,7 +403,7 @@ function ExamsPage() {
                           className="w-20 border border-input px-2 py-1"
                           value={m.score}
                           onChange={(e) =>
-                            void update(m, { score: Number(e.target.value), status: "Pending" })
+                            setMarks((rows) => rows.map((row) => row.id === m.id ? { ...row, score: Number(e.target.value) } : row))
                           }
                         />
                       </td>
@@ -380,22 +412,31 @@ function ExamsPage() {
                         {role === "Admin" ? (
                           <>
                             <button
+                              className={btn("ghost")}
+                              disabled={savingMark === m.id || !Number.isFinite(Number(m.score))}
+                              onClick={() => void update(m, { status: "Pending" })}
+                            >
+                              {savingMark === m.id ? "Saving…" : "Save score"}
+                            </button>{" "}
+                            <button
                               className={btn("good")}
+                              disabled={savingMark === m.id}
                               onClick={() => void update(m, { status: "Approved" })}
                             >
                               Approve
                             </button>{" "}
                             <button
                               className={btn("bad")}
+                              disabled={savingMark === m.id}
                               onClick={() => void update(m, { status: "Denied" })}
                             >
                               Deny
                             </button>
                           </>
                         ) : (
-                          <span className="text-xs text-ink-soft">
-                            Submitted for admin approval
-                          </span>
+                          <button className={btn("ghost")} disabled={savingMark === m.id} onClick={() => void update(m, { status: "Pending" })}>
+                            {savingMark === m.id ? "Saving…" : "Save score for approval"}
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -419,16 +460,38 @@ function ExamsPage() {
             <p className="text-sm">
               {report.className} {report.stream} - {report.term} {report.academicYear}
             </p>
-            <button className={btn()} onClick={() => window.print()}>
-              Print ranked report
-            </button>
+            <div className="flex gap-2">
+              <button className={btn("ghost")} onClick={() => window.print()}>
+                Print ranked report
+              </button>
+              <button className={btn()} onClick={printExamCards}>
+                Print report cards
+              </button>
+            </div>
           </div>
-          <div className="hidden print:block mb-4">
+          <div className={`${printCards ? "block print:block" : "hidden print:hidden"} mb-4`}>
+            {report.students.map((s) => (
+              <article key={s.id} className="mb-8 border border-ink/20 p-6 print:break-after-page">
+                <h2 className="font-display text-2xl">{report.schoolName}</h2>
+                <h3 className="mt-2 font-semibold">{report.name} report card</h3>
+                <p>{s.name} · {s.adm} · {report.className} {s.stream}</p>
+                <p>{report.term} {report.academicYear} · Position {s.position}</p>
+                <table className="mt-4 w-full text-sm">
+                  <thead><tr><th className={thCls}>Subject</th><th className={thCls}>Score</th></tr></thead>
+                  <tbody>{report.subjects.map((subject) => (
+                    <tr key={subject}><td className={tdCls}>{subject}</td><td className={tdCls}>{s.marks[subject] ?? "-"}</td></tr>
+                  ))}</tbody>
+                  <tfoot><tr><th className={tdCls}>Total</th><th className={tdCls}>{Number(s.total).toFixed(1)}</th></tr></tfoot>
+                </table>
+              </article>
+            ))}
+          </div>
+          <div className={`${printCards ? "hidden print:hidden" : "hidden print:block"} mb-4`}>
             <p>
               {report.className} {report.stream} - {report.term} {report.academicYear}
             </p>
           </div>
-          <div className="overflow-x-auto">
+          <div className={`${printCards ? "hidden print:hidden" : "overflow-x-auto"}`}>
             <table className="w-full text-sm">
               <thead>
                 <tr>

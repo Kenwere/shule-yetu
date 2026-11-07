@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { AuthShell, Field, submitClass } from "@/components/AuthShell";
 import { authClient } from "@/lib/auth-client";
+import { neonApi } from "@/lib/neon-api";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -29,6 +30,14 @@ function Login() {
       if (result.error || !result.data) {
         setError(result.error?.message ?? "Sign in failed.");
         return;
+      }
+      const inviteCode = new URLSearchParams(window.location.search).get("invite");
+      if (inviteCode) {
+        await neonApi("/api/staff/accept-invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: inviteCode }),
+        });
       }
       await navigate({ to: "/dashboard" });
     } catch (cause) {
@@ -67,9 +76,14 @@ function Login() {
         </button>
         <div className="mt-4 flex justify-between text-sm">
           <a className="text-ink-soft hover:text-ink">Forgot password?</a>
-          <Link to="/register" className="font-semibold hover:text-gold">
+          <a
+            href={new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("invite")
+              ? `/register?invite=${encodeURIComponent(new URLSearchParams(window.location.search).get("invite") || "")}`
+              : "/register"}
+            className="font-semibold hover:text-gold"
+          >
             Register
-          </Link>
+          </a>
         </div>
         <Link
           to="/student-login"

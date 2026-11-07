@@ -65,10 +65,30 @@ type Assessment = {
   questionCount: number;
   maxMarks: number;
   attemptCount: number;
+  openAttemptCount: number;
   pendingReviewCount: number;
 };
-type AssessmentReviewQuestion = { id:string; type:string; prompt:string; answer:unknown; answerKey:unknown; explanation:string; marks:number; marksAwarded:number|null; feedback:string };
-type AssessmentAttempt = { id:string; attemptNumber:number; status:string; score:number|null; submittedAt:string|null; admissionNo:string; studentName:string; questions:AssessmentReviewQuestion[] };
+type AssessmentReviewQuestion = {
+  id: string;
+  type: string;
+  prompt: string;
+  answer: unknown;
+  answerKey: unknown;
+  explanation: string;
+  marks: number;
+  marksAwarded: number | null;
+  feedback: string;
+};
+type AssessmentAttempt = {
+  id: string;
+  attemptNumber: number;
+  status: string;
+  score: number | null;
+  submittedAt: string | null;
+  admissionNo: string;
+  studentName: string;
+  questions: AssessmentReviewQuestion[];
+};
 type Discussion = {
   id: string;
   className: string;
@@ -160,8 +180,8 @@ function LearningPage() {
   const [assessmentStatus, setAssessmentStatus] = useState<"draft" | "published">("draft");
   const [activeReviewAssessment, setActiveReviewAssessment] = useState<Assessment | null>(null);
   const [reviewAttempts, setReviewAttempts] = useState<AssessmentAttempt[]>([]);
-  const [reviewMarks, setReviewMarks] = useState<Record<string,string>>({});
-  const [reviewFeedback, setReviewFeedback] = useState<Record<string,string>>({});
+  const [reviewMarks, setReviewMarks] = useState<Record<string, string>>({});
+  const [reviewFeedback, setReviewFeedback] = useState<Record<string, string>>({});
   const [questionType, setQuestionType] = useState("multiple_choice");
   const [questionPrompt, setQuestionPrompt] = useState("");
   const [questionOptions, setQuestionOptions] = useState("");
@@ -448,15 +468,32 @@ function LearningPage() {
     }
   }
   async function openAssessmentAttempts(item: Assessment) {
-    try { const response=await neonApi(`/api/lms/assessments/${item.id}/attempts`); setReviewAttempts((await response.json()) as AssessmentAttempt[]); setActiveReviewAssessment(item); }
-    catch(cause){setError(cause instanceof Error?cause.message:"Could not load assessment attempts.");}
-  }
-  async function saveAssessmentMark(attempt:AssessmentAttempt, question:AssessmentReviewQuestion) {
     try {
-      await neonApi(`/api/lms/attempts/${attempt.id}/answers/${question.id}/mark`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({marks:Number(reviewMarks[`${attempt.id}:${question.id}`] ?? question.marksAwarded ?? 0),feedback:reviewFeedback[`${attempt.id}:${question.id}`] ?? question.feedback ?? ""})});
-      if(activeReviewAssessment) await openAssessmentAttempts(activeReviewAssessment);
+      const response = await neonApi(`/api/lms/assessments/${item.id}/attempts`);
+      setReviewAttempts((await response.json()) as AssessmentAttempt[]);
+      setActiveReviewAssessment(item);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load assessment attempts.");
+    }
+  }
+  async function saveAssessmentMark(
+    attempt: AssessmentAttempt,
+    question: AssessmentReviewQuestion,
+  ) {
+    try {
+      await neonApi(`/api/lms/attempts/${attempt.id}/answers/${question.id}/mark`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          marks: Number(reviewMarks[`${attempt.id}:${question.id}`] ?? question.marksAwarded ?? 0),
+          feedback: reviewFeedback[`${attempt.id}:${question.id}`] ?? question.feedback ?? "",
+        }),
+      });
+      if (activeReviewAssessment) await openAssessmentAttempts(activeReviewAssessment);
       await load();
-    } catch(cause){setError(cause instanceof Error?cause.message:"Could not save question marks.");}
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save question marks.");
+    }
   }
   async function openDiscussion(item: Discussion) {
     try {
@@ -852,13 +889,32 @@ function LearningPage() {
                   </div>
                   <span className="text-xs uppercase text-ink-soft">{item.status}</span>
                 </div>
+                <p className="mt-1 text-xs text-ink-soft">
+                  {item.attemptCount} attempt(s) - {item.openAttemptCount} still open -{" "}
+                  {item.pendingReviewCount} written answer(s) awaiting marks
+                </p>
                 {item.instructions && <p className="mt-2 text-sm">{item.instructions}</p>}
                 <button
+                  className={`${btn("ghost")} mt-2 mr-2`}
+                  disabled={!item.attemptCount}
+                  onClick={() => void openAssessmentAttempts(item)}
+                >
+                  Review attempts
+                </button>
+                <button
                   className={`${btn("ghost")} mt-2`}
-                  disabled={item.resultsReleased}
+                  disabled={
+                    item.resultsReleased || item.pendingReviewCount > 0 || item.openAttemptCount > 0
+                  }
                   onClick={() => void releaseAssessmentResults(item)}
                 >
-                  {item.resultsReleased ? "Results released" : "Release student results"}
+                  {item.resultsReleased
+                    ? "Results released"
+                    : item.openAttemptCount > 0
+                      ? "Wait for open attempts"
+                      : item.pendingReviewCount > 0
+                        ? "Mark written answers to release"
+                        : "Release student results"}
                 </button>
               </article>
             ))}
@@ -986,6 +1042,139 @@ function LearningPage() {
           </form>
         </Panel>
       </section>
+      {activeReviewAssessment && (
+        <section className="mt-7 border border-ink/10 bg-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="eyebrow text-ink-soft">Marking assessment</h2>
+              <p className="mt-1 font-display text-xl">{activeReviewAssessment.title}</p>
+            </div>
+            <button className={btn("ghost")} onClick={() => setActiveReviewAssessment(null)}>
+              Close
+            </button>
+          </div>
+          <div className="mt-4 space-y-4">
+            {reviewAttempts.map((attempt) => (
+              <article key={attempt.id} className="border border-ink/10 p-4">
+                <div>
+                  <h3 className="font-semibold">
+                    {attempt.studentName} · {attempt.admissionNo}
+                  </h3>
+                  <p className="text-xs text-ink-soft">
+                    Attempt {attempt.attemptNumber} · {attempt.status} ·{" "}
+                    {attempt.submittedAt
+                      ? new Date(attempt.submittedAt).toLocaleString()
+                      : "Not submitted"}{" "}
+                    · Score so far: {attempt.score ?? "—"}
+                  </p>
+                </div>
+                {attempt.status === "in_progress" && (
+                  <p className="mt-3 text-sm text-ink-soft">
+                    This student is still taking the assessment. Marking is available after
+                    submission.
+                  </p>
+                )}
+                <div className="mt-3 space-y-3">
+                  {attempt.questions.map((question) => (
+                    <div key={question.id} className="border-t border-ink/10 pt-3">
+                      <p className="text-sm font-semibold">
+                        {question.prompt}{" "}
+                        <span className="font-normal text-ink-soft">
+                          ({question.marks} marks · {question.type.replaceAll("_", " ")})
+                        </span>
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm">
+                        Student answer:{" "}
+                        {question.answer === null || question.answer === undefined
+                          ? "No answer"
+                          : typeof question.answer === "string"
+                            ? question.answer
+                            : JSON.stringify(question.answer)}
+                      </p>
+                      {(question.type === "essay" || question.type === "matching") &&
+                      attempt.status !== "in_progress" ? (
+                        <>
+                          <details className="mt-2 text-xs text-ink-soft">
+                            <summary className="cursor-pointer">
+                              Show answer key and explanation
+                            </summary>
+                            <p className="mt-2 whitespace-pre-wrap">
+                              Expected answer:{" "}
+                              {typeof question.answerKey === "string"
+                                ? question.answerKey
+                                : JSON.stringify(question.answerKey)}
+                            </p>
+                            {question.explanation && <p className="mt-1">{question.explanation}</p>}
+                          </details>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-[120px_1fr_auto]">
+                            <input
+                              className={inputCls}
+                              type="number"
+                              min="0"
+                              max={question.marks}
+                              step="0.5"
+                              aria-label={`Marks for ${attempt.admissionNo}`}
+                              value={
+                                reviewMarks[`${attempt.id}:${question.id}`] ??
+                                question.marksAwarded ??
+                                ""
+                              }
+                              onChange={(event) =>
+                                setReviewMarks((values) => ({
+                                  ...values,
+                                  [`${attempt.id}:${question.id}`]: event.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className={inputCls}
+                              aria-label="Feedback for answer"
+                              placeholder="Feedback (optional)"
+                              value={
+                                reviewFeedback[`${attempt.id}:${question.id}`] ??
+                                question.feedback ??
+                                ""
+                              }
+                              onChange={(event) =>
+                                setReviewFeedback((values) => ({
+                                  ...values,
+                                  [`${attempt.id}:${question.id}`]: event.target.value,
+                                }))
+                              }
+                            />
+                            <button
+                              className={btn("primary")}
+                              onClick={() => void saveAssessmentMark(attempt, question)}
+                            >
+                              Save mark
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-ink-soft">
+                            Marked:{" "}
+                            {question.marksAwarded === null
+                              ? "No"
+                              : `${question.marksAwarded} / ${question.marks}`}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-1 text-xs text-ink-soft">
+                          Automatic score:{" "}
+                          {question.marksAwarded === null
+                            ? "Pending"
+                            : `${question.marksAwarded} / ${question.marks}`}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+            {!reviewAttempts.length && (
+              <p className="text-sm text-ink-soft">No attempts have been submitted yet.</p>
+            )}
+          </div>
+        </section>
+      )}
       <section className="mt-7 grid items-start gap-6 xl:grid-cols-2">
         <Panel title="Reusable question bank">
           <p className="mb-4 text-sm text-ink-soft">

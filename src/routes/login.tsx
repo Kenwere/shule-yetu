@@ -71,6 +71,12 @@ function Login() {
             Register
           </Link>
         </div>
+        <Link
+          to="/student-login"
+          className="mt-5 block text-center text-sm font-semibold underline underline-offset-4"
+        >
+          Student learning sign in
+        </Link>
       </form>
     </AuthShell>
   );

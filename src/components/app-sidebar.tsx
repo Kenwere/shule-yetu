@@ -15,6 +15,7 @@ import {
   ChartNoAxesCombined,
   Layers,
   Megaphone,
+  BookOpenCheck,
 } from "lucide-react";
 
 import {
@@ -52,6 +53,7 @@ const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboar
   { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
   { title: "Teachers", url: "/teachers", icon: Users },
   { title: "Exams & marks", url: "/exams", icon: ClipboardList },
+  { title: "Learning (LMS)", url: "/lms", icon: BookOpenCheck },
   { title: "Report cards", url: "/report-cards", icon: FileText },
   { title: "Reports", url: "/reports", icon: ChartNoAxesCombined },
   { title: "Classes & fees", url: "/classes", icon: Layers },
@@ -94,6 +96,7 @@ export function AppSidebar() {
     "/attendance": "view_attendance",
     "/teachers": "manage_staff",
     "/exams": "view_exams",
+    "/lms": "view_lms",
     "/report-cards": "view_exams",
     "/reports": "view_students",
     "/classes": "view_classes",
@@ -101,12 +104,13 @@ export function AppSidebar() {
   };
   const visibleItems = portalItems.filter(
     (item) =>
-      user?.role === "Admin" ||
-      (item.url === "/reports"
-        ? ["view_students", "view_fees", "view_attendance", "view_exams"].some((permission) =>
-            user?.permissions.includes(permission),
-          )
-        : user?.permissions.includes(permissionFor[item.url as string] ?? "")),
+      user?.role !== "Student" &&
+      (user?.role === "Admin" ||
+        (item.url === "/reports"
+          ? ["view_students", "view_fees", "view_attendance", "view_exams"].some((permission) =>
+              user?.permissions.includes(permission),
+            )
+          : user?.permissions.includes(permissionFor[item.url as string] ?? ""))),
   );
 
   return (

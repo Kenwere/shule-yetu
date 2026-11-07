@@ -6,7 +6,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { createRealtime, rawSql } from "@neon/realtime/server";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mountSchoolApi } from "./school-api";
 import { parseTriggerDelivery } from "@neon/functions/triggers";
 
@@ -74,6 +74,22 @@ async function requireUser(
 }
 
 app.use("/api/*", async (c, next) => {
+  if (c.req.path === "/api/lms/auth/login") return await next();
+  const bearer = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (bearer.startsWith("stu.")) {
+    const sessionHash = createHash("sha256").update(bearer.slice(4)).digest("hex");
+    const account = await pool.query(
+      `SELECT a.student_id,s.first_name,s.last_name,s.school_owner_id
+       FROM school_lms_student_accounts a JOIN school_students s ON s.id=a.student_id AND s.school_owner_id=a.school_owner_id
+       WHERE a.session_hash=$1 AND a.active AND a.session_expires_at>now() AND s.status='Active'`,
+      [sessionHash],
+    );
+    if (!account.rowCount) return c.json({ error: "Student session expired. Sign in again." }, 401);
+    c.set("userId", `student:${account.rows[0].student_id}`);
+    c.set("userEmail", "");
+    c.set("userName", `${account.rows[0].first_name} ${account.rows[0].last_name}`.trim());
+    return await next();
+  }
   const user = await requireUser(c.req.raw);
   if (!user) return c.json({ error: "Unauthorized" }, 401);
   c.set("userId", user.id);

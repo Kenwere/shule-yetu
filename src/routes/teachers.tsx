@@ -28,6 +28,8 @@ const labels: Record<string, string> = {
   edit_attendance: "Edit attendance",
   view_exams: "View exams and marks",
   edit_exams: "Edit exams and marks",
+  view_lms: "View learning materials and question bank",
+  manage_lms: "Create learning materials and questions",
 };
 const defaults: Record<string, string[]> = {
   Teacher: [
@@ -38,6 +40,8 @@ const defaults: Record<string, string[]> = {
     "edit_attendance",
     "view_exams",
     "edit_exams",
+    "view_lms",
+    "manage_lms",
   ],
   Accountant: ["view_students", "view_fees", "edit_fees", "view_classes", "view_announcements"],
 };

@@ -16,6 +16,9 @@ const migrations = [
   "0010_exam_academic_year.sql",
   "0011_student_photo.sql",
   "0012_school_logo.sql",
+  "0013_lms_core.sql",
+  "0014_lms_student_accounts.sql",
+  "0015_lms_assessments.sql",
 ];
 const pool = new Pool({ connectionString, max: 1 });
 try {

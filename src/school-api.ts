@@ -1,5 +1,12 @@
 import type { Context as HonoContext, Hono } from "hono";
-import { randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+} from "node:crypto";
+import { promisify } from "node:util";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -11,7 +18,13 @@ import type { Pool } from "pg";
 import { parseTriggerDelivery } from "@neon/functions/triggers";
 
 type ApiEnv = { Variables: { userId: string; userEmail: string; userName: string } };
-type SchoolContext = { schoolId: string; role: string; permissions: string[]; name: string };
+type SchoolContext = {
+  schoolId: string;
+  role: string;
+  permissions: string[];
+  name: string;
+  studentId?: string;
+};
 type Permission =
   | "view_students"
   | "edit_students"
@@ -26,7 +39,9 @@ type Permission =
   | "view_attendance"
   | "edit_attendance"
   | "view_exams"
-  | "edit_exams";
+  | "edit_exams"
+  | "view_lms"
+  | "manage_lms";
 const allPermissions: Permission[] = [
   "view_students",
   "edit_students",
@@ -42,9 +57,28 @@ const allPermissions: Permission[] = [
   "edit_attendance",
   "view_exams",
   "edit_exams",
+  "view_lms",
+  "manage_lms",
 ];
 const s3 = new S3Client({ forcePathStyle: true });
 const imageBucket = "assets";
+const scrypt = promisify(scryptCallback) as (
+  password: string,
+  salt: Buffer,
+  keylen: number,
+) => Promise<Buffer>;
+const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+async function hashStudentPassword(password: string) {
+  const salt = randomBytes(16);
+  return `${salt.toString("hex")}:${(await scrypt(password, salt, 64)).toString("hex")}`;
+}
+async function verifyStudentPassword(password: string, stored: string) {
+  const [saltHex, hashHex] = stored.split(":");
+  if (!saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, "hex");
+  const actual = await scrypt(password, Buffer.from(saltHex, "hex"), expected.length);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
 const rolePermissions: Record<string, Permission[]> = {
   Admin: allPermissions,
   Teacher: [
@@ -55,6 +89,8 @@ const rolePermissions: Record<string, Permission[]> = {
     "edit_attendance",
     "view_exams",
     "edit_exams",
+    "view_lms",
+    "manage_lms",
   ],
   Accountant: ["view_students", "view_fees", "edit_fees", "view_classes", "view_announcements"],
 };
@@ -83,6 +119,23 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         role: row.role,
         permissions: row.permissions ?? [],
         name: row.full_name,
+      };
+    }
+    if (userId.startsWith("student:")) {
+      const studentId = userId.slice("student:".length);
+      const student = await pool.query(
+        `SELECT s.school_owner_id,s.id,s.first_name,s.last_name
+         FROM school_students s JOIN school_lms_student_accounts a ON a.student_id=s.id AND a.school_owner_id=s.school_owner_id
+         WHERE s.id=$1 AND a.active AND s.status='Active'`,
+        [studentId],
+      );
+      if (!student.rowCount) return null;
+      return {
+        schoolId: student.rows[0].school_owner_id,
+        role: "Student",
+        permissions: ["view_lms"],
+        name: `${student.rows[0].first_name} ${student.rows[0].last_name}`.trim(),
+        studentId: student.rows[0].id,
       };
     }
     const owned = await pool.query(
@@ -1510,5 +1563,1200 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [x.schoolId],
     );
     return c.json(r.rows[0]);
+  });
+
+  // LMS staff routes are scoped to existing class/subject records. A teacher
+  // can manage only an assigned class, stream, and subject combination.
+  async function canManageLearning(
+    context: SchoolContext,
+    userId: string,
+    classId: string,
+    subject: string,
+    stream: string,
+  ) {
+    const cl = await pool.query(
+      "SELECT subjects, streams FROM school_classes WHERE id=$1 AND school_owner_id=$2",
+      [classId, context.schoolId],
+    );
+    if (!cl.rowCount) return false;
+    const subjects = cl.rows[0].subjects as string[];
+    const streams = cl.rows[0].streams as string[];
+    if (!subjects.includes(subject) || (stream !== "*" && !streams.includes(stream))) return false;
+    if (context.role === "Admin") return true;
+    const assignment = await pool.query(
+      "SELECT 1 FROM school_teacher_assignments WHERE school_owner_id=$1 AND user_id=$2 AND class_id=$3 AND ($4='*' OR stream=$4) AND subjects ? $5 LIMIT 1",
+      [context.schoolId, userId, classId, stream, subject],
+    );
+    return Boolean(assignment.rowCount);
+  }
+
+  async function canReadDiscussion(context: SchoolContext, userId: string, discussionId: string) {
+    const allowed = await pool.query(
+      `SELECT 1 FROM school_lms_discussions d JOIN school_classes c ON c.id=d.class_id AND c.school_owner_id=d.school_owner_id
+       WHERE d.id=$1 AND d.school_owner_id=$2 AND (
+         $3='Admin' OR
+         ($3='Student' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=d.school_owner_id AND s.class_name=c.name AND s.status='Active' AND c.subjects ? d.subject AND (d.stream='*' OR d.stream=s.stream))) OR
+         ($3='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments a WHERE a.school_owner_id=d.school_owner_id AND a.user_id=$5 AND a.class_id=d.class_id AND (d.stream='*' OR a.stream=d.stream) AND a.subjects ? d.subject)))`,
+      [discussionId, context.schoolId, context.role, context.studentId || null, userId],
+    );
+    return Boolean(allowed.rowCount);
+  }
+
+  app.get("/api/lms/discussions", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to view learning discussions." }, 403);
+    const result = await pool.query(
+      `SELECT d.id,d.class_id AS "classId",cl.name AS "className",d.subject,d.title,d.body,
+        d.author_user_id AS "authorUserId",d.author_name AS "authorName",d.created_at AS "createdAt",d.closed_at AS "closedAt",
+        (SELECT count(*) FROM school_lms_discussion_replies r WHERE r.discussion_id=d.id) AS "replyCount"
+       FROM school_lms_discussions d JOIN school_classes cl ON cl.id=d.class_id AND cl.school_owner_id=d.school_owner_id
+       WHERE d.school_owner_id=$1 AND (
+         $2='Admin' OR
+         ($2='Student' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=d.school_owner_id AND s.class_name=cl.name AND s.status='Active' AND cl.subjects ? d.subject AND (d.stream='*' OR d.stream=s.stream))) OR
+         ($2='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments a WHERE a.school_owner_id=d.school_owner_id AND a.user_id=$3 AND a.class_id=d.class_id AND (d.stream='*' OR a.stream=d.stream) AND a.subjects ? d.subject)))
+       ORDER BY d.created_at DESC LIMIT 100`,
+      [context.schoolId, context.role, c.get("userId"), context.studentId || null],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/discussions", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context || !(context.studentId || context.role === "Admin" || context.role === "Teacher"))
+      return c.json({ error: "Not allowed to start learning discussions." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const classId = String(body?.classId || "");
+    const subject = String(body?.subject || "").trim();
+    const title = String(body?.title || "").trim();
+    const message = String(body?.body || "").trim();
+    let stream = String(body?.stream || "*");
+    if (!classId || !subject || !title || title.length > 180 || !message || message.length > 5000)
+      return c.json({ error: "Choose a class and subject and provide a title and message." }, 400);
+    let allowed = false;
+    if (context.studentId) {
+      const audience = await pool.query(
+        `SELECT s.stream FROM school_students s JOIN school_classes cl ON cl.school_owner_id=s.school_owner_id AND cl.name=s.class_name
+         WHERE s.id=$1 AND s.school_owner_id=$2 AND s.status='Active' AND cl.id=$3 AND cl.subjects ? $4`,
+        [context.studentId, context.schoolId, classId, subject],
+      );
+      allowed = Boolean(audience.rowCount);
+      if (audience.rowCount) stream = audience.rows[0].stream;
+    } else {
+      if (context.role !== "Admin" && stream === "*")
+        return c.json({ error: "Teachers must select one of their assigned streams." }, 403);
+      allowed = await canManageLearning(context, c.get("userId"), classId, subject, stream);
+    }
+    if (!allowed) return c.json({ error: "You cannot post to this class and subject forum." }, 403);
+    const result = await pool.query(
+      `INSERT INTO school_lms_discussions(school_owner_id,class_id,subject,stream,title,body,author_user_id,author_name)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,class_id AS "classId",subject,stream,title,body,author_name AS "authorName",created_at AS "createdAt"`,
+      [context.schoolId, classId, subject, stream, title, message, c.get("userId"), context.name],
+    );
+    return c.json(result.rows[0], 201);
+  });
+
+  app.get("/api/lms/discussions/:id/replies", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context || !(await canReadDiscussion(context, c.get("userId"), c.req.param("id"))))
+      return c.json({ error: "Discussion not found." }, 404);
+    const result = await pool.query(
+      `SELECT id,body,author_name AS "authorName",created_at AS "createdAt" FROM school_lms_discussion_replies
+       WHERE discussion_id=$1 AND school_owner_id=$2 ORDER BY created_at LIMIT 200`,
+      [c.req.param("id"), context.schoolId],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/discussions/:id/replies", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context || !(context.studentId || context.role === "Admin" || context.role === "Teacher"))
+      return c.json({ error: "Not allowed to reply." }, 403);
+    const discussionId = c.req.param("id");
+    if (!(await canReadDiscussion(context, c.get("userId"), discussionId)))
+      return c.json({ error: "Discussion not found." }, 404);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const message = String(body?.body || "").trim();
+    if (!message || message.length > 5000)
+      return c.json({ error: "Reply must contain 1 to 5000 characters." }, 400);
+    const created = await pool.query(
+      `INSERT INTO school_lms_discussion_replies(discussion_id,school_owner_id,body,author_user_id,author_name)
+       SELECT d.id,d.school_owner_id,$3,$4,$5 FROM school_lms_discussions d
+       WHERE d.id=$1 AND d.school_owner_id=$2 AND d.closed_at IS NULL
+       RETURNING id,body,author_name AS "authorName",created_at AS "createdAt"`,
+      [discussionId, context.schoolId, message, c.get("userId"), context.name],
+    );
+    if (!created.rowCount) return c.json({ error: "This discussion is closed." }, 409);
+    return c.json(created.rows[0], 201);
+  });
+
+  app.get("/api/lms/topics", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to view learning topics." }, 403);
+    const classId = c.req.query("classId") || "";
+    const result = await pool.query(
+      `SELECT t.id,t.class_id AS "classId",c.name AS "className",t.subject,t.title,t.description,
+        t.created_by AS "createdBy",t.created_at AS "createdAt"
+       FROM school_lms_topics t JOIN school_classes c ON c.id=t.class_id AND c.school_owner_id=t.school_owner_id
+       WHERE t.school_owner_id=$1 AND ($2='' OR t.class_id::text=$2)
+         AND ($3<>'Student' OR EXISTS (SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=t.school_owner_id AND s.class_name=c.name AND s.status='Active'))
+         AND ($3<>'Teacher' OR EXISTS(SELECT 1 FROM school_teacher_assignments a WHERE a.school_owner_id=t.school_owner_id AND a.user_id=$5 AND a.class_id=t.class_id AND a.subjects ? t.subject))
+       ORDER BY c.name,t.subject,t.title`,
+      [context.schoolId, classId, context.role, context.studentId || null, c.get("userId")],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/topics", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to manage learning topics." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const classId = String(body?.classId || "");
+    const subject = String(body?.subject || "").trim();
+    const title = String(body?.title || "").trim();
+    const description = String(body?.description || "").trim();
+    if (!classId || !subject || !title || title.length > 180 || description.length > 3000)
+      return c.json({ error: "Choose a class and subject and provide a topic title." }, 400);
+    if (!(await canManageLearning(context, c.get("userId"), classId, subject, "*")))
+      return c.json({ error: "You are not assigned to this class and subject." }, 403);
+    const created = await pool.query(
+      `INSERT INTO school_lms_topics(school_owner_id,class_id,subject,title,description,created_by)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING id,class_id AS "classId",subject,title,description,created_at AS "createdAt"`,
+      [context.schoolId, classId, subject, title, description, c.get("userId")],
+    );
+    return c.json(created.rows[0], 201);
+  });
+
+  app.get("/api/lms/materials", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to view learning materials." }, 403);
+    const classId = c.req.query("classId") || "";
+    const result = await pool.query(
+      `SELECT m.id,m.class_id AS "classId",c.name AS "className",m.subject,m.stream,
+        m.topic_id AS "topicId",t.title AS topic,m.title,m.description,m.material_type AS type,
+        m.body,m.file_name AS "fileName",m.mime_type AS "mimeType",m.external_url AS "externalUrl",
+        m.term,m.academic_year AS "academicYear",m.publication_status AS status,
+        m.publish_at AS "publishAt",m.created_by_name AS "createdByName",m.created_at AS "createdAt"
+       FROM school_lms_materials m JOIN school_classes c ON c.id=m.class_id AND c.school_owner_id=m.school_owner_id
+       LEFT JOIN school_lms_topics t ON t.id=m.topic_id AND t.school_owner_id=m.school_owner_id
+       WHERE m.school_owner_id=$1 AND ($2='' OR m.class_id::text=$2)
+         AND (($3='Admin') OR ($3='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments a WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$4 AND a.class_id=m.class_id AND (a.stream=m.stream OR m.stream='*') AND a.subjects ? m.subject)) OR ($3='Student' AND m.publication_status='published' AND EXISTS
+           (SELECT 1 FROM school_students s WHERE s.id=$5::uuid AND s.school_owner_id=m.school_owner_id AND s.class_name=c.name AND s.status='Active' AND (m.stream='*' OR m.stream=s.stream) AND c.subjects ? m.subject))
+           OR ($3<>'Student' AND m.created_by=$4))
+       ORDER BY m.created_at DESC`,
+      [context.schoolId, classId, context.role, c.get("userId"), context.studentId || null],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/materials", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to publish learning materials." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const classId = String(body?.classId || "");
+    const subject = String(body?.subject || "").trim();
+    const title = String(body?.title || "").trim();
+    const description = String(body?.description || "").trim();
+    const type = String(body?.type || "note");
+    const stream = String(body?.stream || "*");
+    const topicId = String(body?.topicId || "") || null;
+    const bodyText = String(body?.body || "");
+    const externalUrl = String(body?.externalUrl || "").trim();
+    const term = String(body?.term || "").trim();
+    const academicYear = String(body?.academicYear || "").trim();
+    const status = String(body?.status || "draft");
+    if (!classId || !subject || !title || title.length > 180 || description.length > 3000)
+      return c.json({ error: "Choose a class and subject and provide a material title." }, 400);
+    if (!(type === "note" || type === "video") || (type === "note" && !bodyText.trim()))
+      return c.json({ error: "Provide note content or choose an external video." }, 400);
+    if (type === "video") {
+      let parsed: URL;
+      try {
+        parsed = new URL(externalUrl);
+      } catch {
+        return c.json({ error: "Enter a valid video URL." }, 400);
+      }
+      if (!["https:", "http:"].includes(parsed.protocol))
+        return c.json({ error: "Video URLs must use HTTP or HTTPS." }, 400);
+    }
+    if (!(status === "draft" || status === "published"))
+      return c.json({ error: "Choose draft or published status." }, 400);
+    if (
+      (stream === "*" && context.role !== "Admin") ||
+      !(await canManageLearning(context, c.get("userId"), classId, subject, stream))
+    )
+      return c.json({ error: "You are not assigned to this class, stream, and subject." }, 403);
+    if (topicId) {
+      const topic = await pool.query(
+        "SELECT 1 FROM school_lms_topics WHERE id=$1 AND school_owner_id=$2 AND class_id=$3 AND subject=$4",
+        [topicId, context.schoolId, classId, subject],
+      );
+      if (!topic.rowCount) return c.json({ error: "The selected topic is unavailable." }, 400);
+    }
+    const created = await pool.query(
+      `INSERT INTO school_lms_materials(school_owner_id,class_id,subject,stream,topic_id,title,description,material_type,body,external_url,term,academic_year,publication_status,created_by,created_by_name)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING id,class_id AS "classId",subject,stream,topic_id AS "topicId",title,description,material_type AS type,body,external_url AS "externalUrl",term,academic_year AS "academicYear",publication_status AS status,created_at AS "createdAt"`,
+      [
+        context.schoolId,
+        classId,
+        subject,
+        stream,
+        topicId,
+        title,
+        description,
+        type,
+        bodyText,
+        externalUrl,
+        term,
+        academicYear,
+        status,
+        c.get("userId"),
+        context.name,
+      ],
+    );
+    return c.json(created.rows[0], 201);
+  });
+
+  app.post("/api/lms/materials/upload", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to upload learning materials." }, 403);
+    const classId = c.req.query("classId") || "";
+    const subject = (c.req.query("subject") || "").trim();
+    const stream = c.req.query("stream") || "*";
+    const title = (c.req.query("title") || "").trim();
+    const description = (c.req.query("description") || "").trim();
+    const topicId = c.req.query("topicId") || null;
+    const term = c.req.query("term") || "";
+    const academicYear = c.req.query("academicYear") || "";
+    const status = c.req.query("status") || "draft";
+    let decodedFileName = c.req.header("X-File-Name") || "";
+    try {
+      decodedFileName = decodeURIComponent(decodedFileName);
+    } catch {
+      return c.json({ error: "Invalid file name." }, 400);
+    }
+    const fileName = decodedFileName.split(/[\\/]/).pop() || "";
+    const mimeType =
+      (c.req.header("Content-Type") || "application/octet-stream").split(";")[0]?.toLowerCase() ||
+      "";
+    const extension = fileName.split(".").pop()?.toLowerCase() || "";
+    const accepted: Record<string, string[]> = {
+      pdf: ["application/pdf"],
+      doc: ["application/msword"],
+      docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      ppt: ["application/vnd.ms-powerpoint"],
+      pptx: ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+      xls: ["application/vnd.ms-excel"],
+      xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+      jpg: ["image/jpeg"],
+      jpeg: ["image/jpeg"],
+      png: ["image/png"],
+      webp: ["image/webp"],
+      mp3: ["audio/mpeg", "audio/mp3"],
+      wav: ["audio/wav", "audio/x-wav"],
+      m4a: ["audio/mp4"],
+      mp4: ["video/mp4"],
+      webm: ["video/webm"],
+      zip: ["application/zip", "application/x-zip-compressed"],
+      txt: ["text/plain"],
+    };
+    if (
+      !classId ||
+      !subject ||
+      !title ||
+      title.length > 180 ||
+      description.length > 3000 ||
+      !(status === "draft" || status === "published")
+    )
+      return c.json({ error: "Choose class, subject, title, and publication status." }, 400);
+    if (!accepted[extension]?.includes(mimeType))
+      return c.json(
+        { error: "This file type is not allowed or its MIME type does not match its extension." },
+        400,
+      );
+    if ((Number(c.req.header("Content-Length")) || 0) > 20 * 1024 * 1024)
+      return c.json({ error: "Learning files are limited to 20 MB." }, 413);
+    if (
+      !(await canManageLearning(context, c.get("userId"), classId, subject, stream)) ||
+      (stream === "*" && context.role !== "Admin")
+    )
+      return c.json({ error: "You are not assigned to this class, stream, and subject." }, 403);
+    if (topicId) {
+      const topic = await pool.query(
+        "SELECT 1 FROM school_lms_topics WHERE id=$1 AND school_owner_id=$2 AND class_id=$3 AND subject=$4",
+        [topicId, context.schoolId, classId, subject],
+      );
+      if (!topic.rowCount) return c.json({ error: "The selected topic is unavailable." }, 400);
+    }
+    const bytes = await c.req.arrayBuffer();
+    if (!bytes.byteLength || bytes.byteLength > 20 * 1024 * 1024)
+      return c.json({ error: "The file must be between 1 byte and 20 MB." }, 413);
+    const key = `learning/${context.schoolId}/${randomUUID()}.${extension}`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: imageBucket,
+        Key: key,
+        Body: new Uint8Array(bytes),
+        ContentType: mimeType,
+      }),
+    );
+    try {
+      const created = await pool.query(
+        `INSERT INTO school_lms_materials(school_owner_id,class_id,subject,stream,topic_id,title,description,material_type,file_key,file_name,mime_type,term,academic_year,publication_status,created_by,created_by_name)
+         VALUES($1,$2,$3,$4,$5,$6,$7,'file',$8,$9,$10,$11,$12,$13,$14,$15)
+         RETURNING id,class_id AS "classId",subject,stream,title,description,file_name AS "fileName",mime_type AS "mimeType",publication_status AS status,created_at AS "createdAt"`,
+        [
+          context.schoolId,
+          classId,
+          subject,
+          stream,
+          topicId,
+          title,
+          description,
+          key,
+          fileName.slice(0, 255),
+          mimeType,
+          term,
+          academicYear,
+          status,
+          c.get("userId"),
+          context.name,
+        ],
+      );
+      return c.json(created.rows[0], 201);
+    } catch (error) {
+      await s3
+        .send(new DeleteObjectCommand({ Bucket: imageBucket, Key: key }))
+        .catch(() => undefined);
+      throw error;
+    }
+  });
+
+  app.get("/api/lms/materials/:id/download", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to access learning materials." }, 403);
+    const item = await pool.query(
+      `SELECT m.file_key,m.file_name,m.mime_type FROM school_lms_materials m JOIN school_classes c ON c.id=m.class_id AND c.school_owner_id=m.school_owner_id
+       WHERE m.id=$1 AND m.school_owner_id=$2 AND m.publication_status='published' AND m.material_type='file'
+       AND ($3<>'Student' OR EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=m.school_owner_id AND s.class_name=c.name AND s.status='Active' AND (m.stream='*' OR m.stream=s.stream) AND c.subjects ? m.subject))
+       AND ($3<>'Teacher' OR EXISTS(SELECT 1 FROM school_teacher_assignments a WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$5 AND a.class_id=m.class_id AND (a.stream=m.stream OR m.stream='*') AND a.subjects ? m.subject))`,
+      [
+        c.req.param("id"),
+        context.schoolId,
+        context.role,
+        context.studentId || null,
+        c.get("userId"),
+      ],
+    );
+    if (!item.rowCount || !item.rows[0].file_key)
+      return c.json({ error: "Published file not found." }, 404);
+    if (context.studentId) {
+      await pool.query(
+        `INSERT INTO school_lms_progress(school_owner_id,student_id,material_id,download_count)
+         SELECT m.school_owner_id,$2,m.id,1 FROM school_lms_materials m JOIN school_classes cl ON cl.id=m.class_id AND cl.school_owner_id=m.school_owner_id
+         JOIN school_students st ON st.id=$2 AND st.school_owner_id=m.school_owner_id AND st.class_name=cl.name AND st.status='Active'
+         WHERE m.id=$1 AND m.publication_status='published' AND (m.stream='*' OR m.stream=st.stream) AND cl.subjects ? m.subject
+         ON CONFLICT(student_id,material_id) DO UPDATE SET last_activity_at=now(),download_count=school_lms_progress.download_count+1`,
+        [c.req.param("id"), context.studentId],
+      );
+    }
+    const url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: imageBucket, Key: item.rows[0].file_key }),
+      { expiresIn: 300 },
+    );
+    return c.json({ url, fileName: item.rows[0].file_name, mimeType: item.rows[0].mime_type });
+  });
+
+  app.get("/api/lms/questions", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to view the question bank." }, 403);
+    if (context.role === "Student")
+      return c.json({ error: "Students cannot access the teacher question bank." }, 403);
+    const result = await pool.query(
+      `SELECT q.id,q.class_id AS "classId",c.name AS "className",q.subject,q.topic_id AS "topicId",
+        t.title AS topic,q.question_type AS type,q.prompt,q.options,q.answer_key AS "answerKey",
+        q.explanation,q.marks,q.created_at AS "createdAt"
+       FROM school_lms_question_bank q JOIN school_classes c ON c.id=q.class_id AND c.school_owner_id=q.school_owner_id
+       LEFT JOIN school_lms_topics t ON t.id=q.topic_id AND t.school_owner_id=q.school_owner_id
+       WHERE q.school_owner_id=$1 AND ($2='Admin' OR q.created_by=$3 OR EXISTS
+         (SELECT 1 FROM school_teacher_assignments a WHERE a.school_owner_id=q.school_owner_id AND a.user_id=$3 AND a.class_id=q.class_id AND a.subjects ? q.subject))
+       ORDER BY q.created_at DESC LIMIT 500`,
+      [context.schoolId, context.role, c.get("userId")],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/questions", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to manage the question bank." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const classId = String(body?.classId || "");
+    const subject = String(body?.subject || "").trim();
+    const prompt = String(body?.prompt || "").trim();
+    const type = String(body?.type || "");
+    const allowed = [
+      "multiple_choice",
+      "true_false",
+      "short_answer",
+      "fill_blank",
+      "matching",
+      "essay",
+    ];
+    const marks = Number(body?.marks || 1);
+    if (
+      !classId ||
+      !subject ||
+      !prompt ||
+      prompt.length > 10000 ||
+      !allowed.includes(type) ||
+      !Number.isFinite(marks) ||
+      marks <= 0
+    )
+      return c.json(
+        {
+          error:
+            "Provide a class, subject, valid question type, question text, and positive marks.",
+        },
+        400,
+      );
+    if (!(await canManageLearning(context, c.get("userId"), classId, subject, "*")))
+      return c.json({ error: "You are not assigned to this class and subject." }, 403);
+    const options = Array.isArray(body?.options) ? body.options : [];
+    if (type === "multiple_choice" && options.length < 2)
+      return c.json({ error: "Multiple choice questions need at least two answer options." }, 400);
+    const created = await pool.query(
+      `INSERT INTO school_lms_question_bank(school_owner_id,class_id,subject,topic_id,question_type,prompt,options,answer_key,explanation,marks,created_by)
+       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11)
+       RETURNING id,class_id AS "classId",subject,topic_id AS "topicId",question_type AS type,prompt,options,answer_key AS "answerKey",explanation,marks,created_at AS "createdAt"`,
+      [
+        context.schoolId,
+        classId,
+        subject,
+        String(body?.topicId || "") || null,
+        type,
+        prompt,
+        JSON.stringify(options),
+        JSON.stringify(body?.answerKey ?? null),
+        String(body?.explanation || "").slice(0, 3000),
+        marks,
+        c.get("userId"),
+      ],
+    );
+    return c.json(created.rows[0], 201);
+  });
+
+  app.get("/api/lms/assessments", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to view assessments." }, 403);
+    const rows = await pool.query(
+      `SELECT a.id,a.class_id AS "classId",cl.name AS "className",a.subject,a.stream,a.title,a.instructions,
+        a.starts_at AS "startsAt",a.ends_at AS "endsAt",a.duration_minutes AS "durationMinutes",a.attempts_allowed AS "attemptsAllowed",
+        a.results_released AS "resultsReleased",a.publication_status AS status,a.created_by_name AS "createdByName",
+        (SELECT count(*) FROM school_lms_assessment_questions aq WHERE aq.assessment_id=a.id) AS "questionCount",
+        (SELECT COALESCE(sum(q.marks),0) FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=a.id) AS "maxMarks",
+        (SELECT count(*) FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid) AS "attemptsUsed",
+        CASE WHEN a.results_released AND $2='Student' THEN (SELECT at.score FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid AND at.status IN ('submitted','marked') ORDER BY at.attempt_number DESC LIMIT 1) ELSE NULL END AS "releasedScore"
+       FROM school_lms_assessments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
+       WHERE a.school_owner_id=$1 AND ($2='Admin' OR ($2='Student' AND a.publication_status='published' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND s.stream=a.stream OR s.id=$4::uuid AND a.stream='*' AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND cl.subjects ? a.subject)) OR ($2='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments ta WHERE ta.school_owner_id=a.school_owner_id AND ta.user_id=$3 AND ta.class_id=a.class_id AND (a.stream='*' OR ta.stream=a.stream) AND ta.subjects ? a.subject)))
+       ORDER BY a.starts_at NULLS FIRST,a.created_at DESC LIMIT 300`,
+      [context.schoolId, context.role, c.get("userId"), context.studentId || null],
+    );
+    return c.json(rows.rows);
+  });
+
+  app.post("/api/lms/assessments", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to create assessments." }, 403);
+    const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const classId = String(b?.classId || ""),
+      subject = String(b?.subject || "").trim();
+    const stream = String(b?.stream || "*"),
+      title = String(b?.title || "").trim();
+    const questionIds = Array.isArray(b?.questionIds)
+      ? [...new Set(b.questionIds.map(String))]
+      : [];
+    const duration = Number(b?.durationMinutes || 0),
+      attempts = Number(b?.attemptsAllowed || 1);
+    const starts = b?.startsAt ? new Date(String(b.startsAt)) : null;
+    const ends = b?.endsAt ? new Date(String(b.endsAt)) : null;
+    if (
+      !classId ||
+      !subject ||
+      !title ||
+      title.length > 180 ||
+      questionIds.length < 1 ||
+      questionIds.length > 100 ||
+      !Number.isInteger(duration) ||
+      duration < 1 ||
+      duration > 600 ||
+      !Number.isInteger(attempts) ||
+      attempts < 1 ||
+      attempts > 10 ||
+      (starts && !Number.isFinite(starts.getTime())) ||
+      (ends && !Number.isFinite(ends.getTime())) ||
+      (starts && ends && ends <= starts)
+    )
+      return c.json(
+        {
+          error:
+            "Provide an assessment title, at least one question, valid schedule, duration, and attempt limit.",
+        },
+        400,
+      );
+    if (stream === "*" && context.role !== "Admin")
+      return c.json({ error: "Teachers must choose an assigned stream." }, 403);
+    if (!(await canManageLearning(context, c.get("userId"), classId, subject, stream)))
+      return c.json({ error: "You are not assigned to this class, stream, and subject." }, 403);
+    const qrows = await pool.query(
+      "SELECT id FROM school_lms_question_bank WHERE school_owner_id=$1 AND class_id=$2 AND subject=$3 AND id=ANY($4::uuid[])",
+      [context.schoolId, classId, subject, questionIds],
+    );
+    if (qrows.rowCount !== questionIds.length)
+      return c.json(
+        { error: "Every selected question must belong to this class and subject." },
+        400,
+      );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const created = await client.query(
+        `INSERT INTO school_lms_assessments(school_owner_id,class_id,subject,stream,title,instructions,starts_at,ends_at,duration_minutes,attempts_allowed,publication_status,created_by,created_by_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+        [
+          context.schoolId,
+          classId,
+          subject,
+          stream,
+          title,
+          String(b?.instructions || "").slice(0, 10000),
+          starts?.toISOString() || null,
+          ends?.toISOString() || null,
+          duration,
+          attempts,
+          b?.status === "published" ? "published" : "draft",
+          c.get("userId"),
+          context.name,
+        ],
+      );
+      for (let i = 0; i < questionIds.length; i++)
+        await client.query(
+          "INSERT INTO school_lms_assessment_questions(assessment_id,question_id,position) VALUES($1,$2,$3)",
+          [created.rows[0].id, questionIds[i], i],
+        );
+      await client.query("COMMIT");
+      return c.json({ id: created.rows[0].id }, 201);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/api/lms/assessments/:id/results-release", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to release results." }, 403);
+    const found = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (
+      !found.rowCount ||
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        found.rows[0].class_id,
+        found.rows[0].subject,
+        found.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assessment not found or outside your permissions." }, 404);
+    await pool.query(
+      "UPDATE school_lms_assessments SET results_released=true WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    return c.json({ released: true });
+  });
+
+  app.post("/api/lms/assessments/:id/start", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const a = await client.query(
+        `SELECT a.* FROM school_lms_assessments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id JOIN school_students s ON s.id=$2 AND s.school_owner_id=a.school_owner_id AND s.class_name=cl.name AND s.status='Active' AND (a.stream='*' OR a.stream=s.stream) AND cl.subjects ? a.subject WHERE a.id=$1 AND a.school_owner_id=$3 AND a.publication_status='published' FOR UPDATE OF a`,
+        [c.req.param("id"), context.studentId, context.schoolId],
+      );
+      if (!a.rowCount) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "Assessment is unavailable to this student." }, 404);
+      }
+      const row = a.rows[0],
+        now = Date.now();
+      if (row.starts_at && new Date(row.starts_at).getTime() > now) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "This assessment has not started." }, 409);
+      }
+      if (row.ends_at && new Date(row.ends_at).getTime() <= now) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "The assessment window has closed." }, 409);
+      }
+      let attempt = await client.query(
+        "SELECT id,deadline_at,status FROM school_lms_attempts WHERE assessment_id=$1 AND student_id=$2 AND status='in_progress' ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE",
+        [row.id, context.studentId],
+      );
+      if (!attempt.rowCount) {
+        const used = await client.query(
+          "SELECT count(*)::int AS n FROM school_lms_attempts WHERE assessment_id=$1 AND student_id=$2",
+          [row.id, context.studentId],
+        );
+        if (used.rows[0].n >= row.attempts_allowed) {
+          await client.query("ROLLBACK");
+          return c.json({ error: "You have used all allowed attempts." }, 409);
+        }
+        const deadline = Math.min(
+          now + row.duration_minutes * 60000,
+          row.ends_at ? new Date(row.ends_at).getTime() : Number.MAX_SAFE_INTEGER,
+        );
+        attempt = await client.query(
+          "INSERT INTO school_lms_attempts(school_owner_id,assessment_id,student_id,attempt_number,deadline_at) VALUES($1,$2,$3,$4,to_timestamp($5/1000.0)) RETURNING id,deadline_at,status",
+          [context.schoolId, row.id, context.studentId, used.rows[0].n + 1, deadline],
+        );
+      }
+      if (new Date(attempt.rows[0].deadline_at).getTime() <= now) {
+        await client.query(
+          "UPDATE school_lms_attempts SET status='submitted',submitted_at=now() WHERE id=$1",
+          [attempt.rows[0].id],
+        );
+        await client.query("COMMIT");
+        return c.json({ error: "The time limit has passed." }, 409);
+      }
+      const questions = await client.query(
+        `SELECT q.id,q.question_type AS type,q.prompt,q.options,q.marks,aa.answer FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=$1 AND aa.question_id=q.id WHERE aq.assessment_id=$2 ORDER BY aq.position`,
+        [attempt.rows[0].id, row.id],
+      );
+      await client.query("COMMIT");
+      return c.json({
+        assessment: { id: row.id, title: row.title, instructions: row.instructions },
+        attempt: attempt.rows[0],
+        questions: questions.rows,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.put("/api/lms/attempts/:attemptId/answers/:questionId", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const answer = b?.answer;
+    if (
+      typeof answer !== "string" &&
+      !Array.isArray(answer) &&
+      (answer === null || typeof answer !== "object")
+    )
+      return c.json({ error: "Enter an answer." }, 400);
+    const result = await pool.query(
+      `INSERT INTO school_lms_attempt_answers(attempt_id,question_id,answer) SELECT at.id,q.id,$4::jsonb FROM school_lms_attempts at JOIN school_lms_assessment_questions aq ON aq.assessment_id=at.assessment_id AND aq.question_id=$3 JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE at.id=$1 AND at.student_id=$2 AND at.school_owner_id=$5 AND at.status='in_progress' AND at.deadline_at>now() ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer=EXCLUDED.answer,updated_at=now() RETURNING question_id`,
+      [
+        c.req.param("attemptId"),
+        context.studentId,
+        c.req.param("questionId"),
+        JSON.stringify(answer),
+        context.schoolId,
+      ],
+    );
+    return result.rowCount
+      ? c.json({ saved: true })
+      : c.json({ error: "Attempt is closed or question is unavailable." }, 409);
+  });
+
+  app.post("/api/lms/attempts/:attemptId/submit", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const a = await client.query(
+        "SELECT id,assessment_id,status,deadline_at FROM school_lms_attempts WHERE id=$1 AND student_id=$2 AND school_owner_id=$3 FOR UPDATE",
+        [c.req.param("attemptId"), context.studentId, context.schoolId],
+      );
+      if (!a.rowCount) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "Attempt not found." }, 404);
+      }
+      if (a.rows[0].status !== "in_progress") {
+        await client.query("COMMIT");
+        return c.json({ submitted: true });
+      }
+      if (new Date(a.rows[0].deadline_at).getTime() <= Date.now()) {
+        await client.query(
+          "UPDATE school_lms_attempts SET status='submitted',submitted_at=deadline_at WHERE id=$1",
+          [a.rows[0].id],
+        );
+      }
+      await client.query(
+        `UPDATE school_lms_attempt_answers aa SET marks_awarded=CASE WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') AND lower(btrim(COALESCE(aa.answer#>>'{}',''))) = lower(btrim(COALESCE(q.answer_key#>>'{}',''))) THEN q.marks WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') THEN 0 ELSE NULL END FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=$1 AND aa.attempt_id=$2 AND aa.question_id=q.id`,
+        [a.rows[0].assessment_id, a.rows[0].id],
+      );
+      await client.query(
+        `UPDATE school_lms_attempt_answers aa SET marks_awarded=0 FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=$1 AND aq.question_id=q.id AND aa.attempt_id=$2 AND aa.question_id=q.id AND aa.marks_awarded IS NULL AND q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank')`,
+        [a.rows[0].assessment_id, a.rows[0].id],
+      );
+      await client.query(
+        `UPDATE school_lms_attempts SET status='submitted',submitted_at=now(),score=(SELECT COALESCE(sum(marks_awarded),0) FROM school_lms_attempt_answers WHERE attempt_id=$1) WHERE id=$1`,
+        [a.rows[0].id],
+      );
+      await client.query("COMMIT");
+      return c.json({ submitted: true });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/api/lms/auth/login", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const admission = String(body?.admissionNo || "").trim();
+    const password = String(body?.password || "");
+    const schoolName = String(body?.schoolName || "").trim();
+    if (!admission || !password)
+      return c.json({ error: "Admission number and password are required." }, 400);
+    const candidates = await pool.query(
+      `SELECT s.id,s.school_owner_id,s.admission_no,s.first_name,s.last_name,s.class_name,s.stream,
+        a.password_hash,a.must_change_password,a.active,a.locked_until
+       FROM school_students s JOIN school_lms_student_accounts a ON a.student_id=s.id AND a.school_owner_id=s.school_owner_id
+       JOIN school_profiles p ON p.user_id=s.school_owner_id
+       WHERE s.admission_no=$1 AND s.status='Active' AND a.active AND ($2='' OR lower(p.school_name)=lower($2)) LIMIT 2`,
+      [admission, schoolName],
+    );
+    if (candidates.rowCount !== 1)
+      return c.json(
+        {
+          error: candidates.rowCount
+            ? "More than one school uses this admission number. Enter your school name to continue."
+            : "Admission number or password is incorrect.",
+        },
+        401,
+      );
+    const student = candidates.rows[0];
+    if (student.locked_until && new Date(student.locked_until) > new Date())
+      return c.json(
+        { error: "Too many failed attempts. Ask your school administrator to reset access." },
+        429,
+      );
+    if (!(await verifyStudentPassword(password, student.password_hash))) {
+      await pool.query(
+        `UPDATE school_lms_student_accounts SET failed_login_count=failed_login_count+1,
+         locked_until=CASE WHEN failed_login_count+1>=5 THEN now()+interval '15 minutes' ELSE locked_until END WHERE student_id=$1`,
+        [student.id],
+      );
+      return c.json({ error: "Admission number or password is incorrect." }, 401);
+    }
+    const token = randomBytes(32).toString("base64url");
+    await pool.query(
+      "UPDATE school_lms_student_accounts SET session_hash=$2,session_expires_at=now()+interval '24 hours',last_login_at=now(),failed_login_count=0,locked_until=NULL,updated_at=now() WHERE student_id=$1",
+      [student.id, hashToken(token)],
+    );
+    return c.json({
+      token: `stu.${token}`,
+      mustChangePassword: student.must_change_password,
+      student: {
+        id: student.id,
+        admissionNo: student.admission_no,
+        firstName: student.first_name,
+        lastName: student.last_name,
+        className: student.class_name,
+        stream: student.stream,
+      },
+    });
+  });
+
+  app.get("/api/lms/accounts", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context || context.role !== "Admin")
+      return c.json(
+        { error: "Only the school administrator can manage student LMS accounts." },
+        403,
+      );
+    const className = c.req.query("class") || "";
+    const result = await pool.query(
+      `SELECT s.id,s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",s.class_name AS "className",s.stream,
+        (a.student_id IS NOT NULL AND a.active) AS "accountActive",COALESCE(a.must_change_password,false) AS "mustChangePassword",a.last_login_at AS "lastLoginAt"
+       FROM school_students s LEFT JOIN school_lms_student_accounts a ON a.student_id=s.id AND a.school_owner_id=s.school_owner_id
+       WHERE s.school_owner_id=$1 AND s.status='Active' AND ($2='' OR s.class_name=$2)
+       ORDER BY s.class_name,s.stream,s.last_name,s.first_name LIMIT 1000`,
+      [context.schoolId, className],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/accounts/generate", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context || context.role !== "Admin")
+      return c.json(
+        { error: "Only the school administrator can generate student passwords." },
+        403,
+      );
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const className = String(body?.className || "").trim();
+    const stream = String(body?.stream || "").trim();
+    const selected = Array.isArray(body?.studentIds)
+      ? body.studentIds.map(String).filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+      : [];
+    if (!className && !selected.length)
+      return c.json({ error: "Choose a class or select students." }, 400);
+    const students = await pool.query(
+      `SELECT id,admission_no AS "admissionNo",first_name AS "firstName",last_name AS "lastName",class_name AS "className",stream
+       FROM school_students WHERE school_owner_id=$1 AND status='Active' AND ($2='' OR class_name=$2) AND ($3='' OR stream=$3)
+         AND (cardinality($4::uuid[])=0 OR id=ANY($4::uuid[])) ORDER BY class_name,stream,last_name,first_name LIMIT 500`,
+      [context.schoolId, className, stream, selected],
+    );
+    if (!students.rowCount)
+      return c.json({ error: "No active students matched the selection." }, 404);
+    const credentials: {
+      admissionNo: string;
+      firstName: string;
+      lastName: string;
+      className: string;
+      stream: string;
+      temporaryPassword: string;
+    }[] = [];
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const student of students.rows) {
+        const password = randomBytes(9).toString("base64url");
+        const digest = await hashStudentPassword(password);
+        await client.query(
+          `INSERT INTO school_lms_student_accounts(school_owner_id,student_id,password_hash,must_change_password,active,session_hash,session_expires_at)
+           VALUES($1,$2,$3,true,true,NULL,NULL) ON CONFLICT(student_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=true,active=true,session_hash=NULL,session_expires_at=NULL,failed_login_count=0,locked_until=NULL,updated_at=now()`,
+          [context.schoolId, student.id, digest],
+        );
+        credentials.push({
+          admissionNo: student.admissionNo,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          className: student.className,
+          stream: student.stream,
+          temporaryPassword: password,
+        });
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    return c.json(
+      {
+        credentials,
+        notice:
+          "Save or download this password sheet now. Temporary passwords are shown only once.",
+      },
+      201,
+    );
+  });
+
+  app.post("/api/lms/auth/change-password", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const current = String(body?.currentPassword || "");
+    const nextPassword = String(body?.newPassword || "");
+    if (nextPassword.length < 10 || nextPassword.length > 128)
+      return c.json({ error: "New password must be between 10 and 128 characters." }, 400);
+    const account = await pool.query(
+      "SELECT password_hash FROM school_lms_student_accounts WHERE student_id=$1 AND active",
+      [context.studentId],
+    );
+    if (!account.rowCount || !(await verifyStudentPassword(current, account.rows[0].password_hash)))
+      return c.json({ error: "Current password is incorrect." }, 401);
+    const token = randomBytes(32).toString("base64url");
+    await pool.query(
+      "UPDATE school_lms_student_accounts SET password_hash=$2,must_change_password=false,session_hash=$3,session_expires_at=now()+interval '24 hours',updated_at=now() WHERE student_id=$1",
+      [context.studentId, await hashStudentPassword(nextPassword), hashToken(token)],
+    );
+    return c.json({ token: `stu.${token}` });
+  });
+
+  app.post("/api/lms/auth/logout", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    await pool.query(
+      "UPDATE school_lms_student_accounts SET session_hash=NULL,session_expires_at=NULL WHERE student_id=$1",
+      [context.studentId],
+    );
+    return c.json({ ok: true });
+  });
+
+  app.get("/api/lms/student/me", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const result = await pool.query(
+      `SELECT s.id,s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",s.class_name AS "className",s.stream,
+        cl.id AS "classId",cl.subjects,p.school_name AS "schoolName",p.academic_year AS "academicYear",p.active_term AS "activeTerm",a.must_change_password AS "mustChangePassword"
+       FROM school_students s JOIN school_profiles p ON p.user_id=s.school_owner_id JOIN school_lms_student_accounts a ON a.student_id=s.id
+       LEFT JOIN school_classes cl ON cl.school_owner_id=s.school_owner_id AND cl.name=s.class_name
+       WHERE s.id=$1 AND s.school_owner_id=$2 AND s.status='Active'`,
+      [context.studentId, context.schoolId],
+    );
+    return result.rowCount
+      ? c.json(result.rows[0])
+      : c.json({ error: "Student record not found." }, 404);
+  });
+
+  app.post("/api/lms/materials/:id/activity", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const seconds = Math.max(0, Math.min(3600, Math.floor(Number(body?.secondsViewed) || 0)));
+    const completed = body?.completed === true;
+    const result = await pool.query(
+      `INSERT INTO school_lms_progress(school_owner_id,student_id,material_id,seconds_viewed,completed_at)
+       SELECT m.school_owner_id,$2,m.id,$3,CASE WHEN $4 THEN now() ELSE NULL END FROM school_lms_materials m
+       JOIN school_classes cl ON cl.id=m.class_id AND cl.school_owner_id=m.school_owner_id
+       JOIN school_students s ON s.id=$2 AND s.school_owner_id=m.school_owner_id AND s.class_name=cl.name AND s.status='Active'
+       WHERE m.id=$1 AND m.publication_status='published' AND (m.stream='*' OR m.stream=s.stream) AND cl.subjects ? m.subject
+       ON CONFLICT(student_id,material_id) DO UPDATE SET last_activity_at=now(),seconds_viewed=school_lms_progress.seconds_viewed+EXCLUDED.seconds_viewed,completed_at=COALESCE(school_lms_progress.completed_at,EXCLUDED.completed_at)
+       RETURNING material_id AS "materialId",opened_at AS "openedAt",last_activity_at AS "lastActivityAt",completed_at AS "completedAt",seconds_viewed AS "secondsViewed"`,
+      [c.req.param("id"), context.studentId, seconds, completed],
+    );
+    if (!result.rowCount)
+      return c.json({ error: "Learning material is not available to this student." }, 404);
+    return c.json(result.rows[0]);
+  });
+
+  app.get("/api/lms/student/progress", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const result = await pool.query(
+      `SELECT m.id AS "materialId",m.title,m.subject,m.material_type AS type,m.created_by_name AS "teacherName",
+        p.opened_at AS "openedAt",p.last_activity_at AS "lastActivityAt",p.completed_at AS "completedAt",p.seconds_viewed AS "secondsViewed",p.download_count AS "downloadCount"
+       FROM school_lms_materials m JOIN school_classes cl ON cl.id=m.class_id AND cl.school_owner_id=m.school_owner_id
+       JOIN school_students s ON s.id=$2 AND s.school_owner_id=m.school_owner_id AND s.class_name=cl.name AND s.status='Active'
+       LEFT JOIN school_lms_progress p ON p.material_id=m.id AND p.student_id=s.id
+       WHERE m.school_owner_id=$1 AND m.publication_status='published' AND (m.stream='*' OR m.stream=s.stream) AND cl.subjects ? m.subject
+       ORDER BY p.last_activity_at DESC NULLS LAST,m.created_at DESC LIMIT 200`,
+      [context.schoolId, context.studentId],
+    );
+    return c.json(result.rows);
+  });
+
+  app.get("/api/lms/assignments", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context) return c.json({ error: "Not allowed to view assignments." }, 403);
+    const result = await pool.query(
+      `SELECT a.id,a.class_id AS "classId",cl.name AS "className",a.subject,a.stream,a.topic_id AS "topicId",t.title AS topic,
+        a.title,a.instructions,a.term,a.academic_year AS "academicYear",a.due_at AS "dueAt",a.max_marks AS "maxMarks",a.allow_late AS "allowLate",a.allow_resubmit AS "allowResubmit",
+        a.publication_status AS status,a.created_by_name AS "createdByName",a.created_at AS "createdAt",
+        sub.id AS "submissionId",sub.response_text AS "responseText",sub.status AS "submissionStatus",sub.marks,sub.feedback,sub.submitted_at AS "submittedAt"
+       FROM school_lms_assignments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
+       LEFT JOIN school_lms_topics t ON t.id=a.topic_id AND t.school_owner_id=a.school_owner_id
+       LEFT JOIN school_lms_submissions sub ON sub.assignment_id=a.id AND sub.student_id=$4::uuid
+       WHERE a.school_owner_id=$1 AND (
+         $2='Admin' OR
+         ($2='Student' AND a.publication_status='published' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=a.school_owner_id AND s.class_name=cl.name AND s.status='Active' AND (a.stream='*' OR a.stream=s.stream) AND cl.subjects ? a.subject)) OR
+         ($2='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments ta WHERE ta.school_owner_id=a.school_owner_id AND ta.user_id=$3 AND ta.class_id=a.class_id AND (a.stream='*' OR ta.stream=a.stream) AND ta.subjects ? a.subject)))
+       ORDER BY a.due_at NULLS LAST,a.created_at DESC LIMIT 300`,
+      [context.schoolId, context.role, c.get("userId"), context.studentId || null],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/assignments", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to create assignments." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const classId = String(body?.classId || "");
+    const subject = String(body?.subject || "").trim();
+    const stream = String(body?.stream || "*");
+    const title = String(body?.title || "").trim();
+    const instructions = String(body?.instructions || "").trim();
+    const term = String(body?.term || "").trim();
+    const academicYear = String(body?.academicYear || "").trim();
+    const maxMarks = Number(body?.maxMarks || 0);
+    const dueAt = body?.dueAt ? new Date(String(body.dueAt)) : null;
+    const status = String(body?.status || "draft");
+    if (
+      !classId ||
+      !subject ||
+      !title ||
+      title.length > 180 ||
+      instructions.length > 10000 ||
+      !Number.isFinite(maxMarks) ||
+      maxMarks <= 0 ||
+      (dueAt && !Number.isFinite(dueAt.getTime())) ||
+      !(status === "draft" || status === "published")
+    )
+      return c.json(
+        {
+          error:
+            "Provide a class, subject, assignment title, valid due date, and positive maximum marks.",
+        },
+        400,
+      );
+    if (stream === "*" && context.role !== "Admin")
+      return c.json({ error: "Teachers must select one of their assigned streams." }, 403);
+    if (!(await canManageLearning(context, c.get("userId"), classId, subject, stream)))
+      return c.json({ error: "You are not assigned to this class, stream, and subject." }, 403);
+    const result = await pool.query(
+      `INSERT INTO school_lms_assignments(school_owner_id,class_id,subject,stream,topic_id,title,instructions,term,academic_year,due_at,max_marks,allow_late,allow_resubmit,publication_status,created_by,created_by_name)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       RETURNING id,class_id AS "classId",subject,stream,title,instructions,term,academic_year AS "academicYear",due_at AS "dueAt",max_marks AS "maxMarks",allow_late AS "allowLate",allow_resubmit AS "allowResubmit",publication_status AS status,created_at AS "createdAt"`,
+      [
+        context.schoolId,
+        classId,
+        subject,
+        stream,
+        String(body?.topicId || "") || null,
+        title,
+        instructions,
+        term,
+        academicYear,
+        dueAt?.toISOString() || null,
+        maxMarks,
+        body?.allowLate === true,
+        body?.allowResubmit !== false,
+        status,
+        c.get("userId"),
+        context.name,
+      ],
+    );
+    return c.json(result.rows[0], 201);
+  });
+
+  app.post("/api/lms/assignments/:id/submit", async (c) => {
+    const context = await guard(c, "view_lms");
+    if (!context?.studentId || context.role !== "Student")
+      return c.json({ error: "Student account required." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const responseText = String(body?.responseText || "").trim();
+    if (!responseText || responseText.length > 20000)
+      return c.json({ error: "Assignment response must contain 1 to 20000 characters." }, 400);
+    const assignment = await pool.query(
+      `SELECT a.id,a.allow_late,a.allow_resubmit,a.due_at FROM school_lms_assignments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
+       JOIN school_students s ON s.id=$2 AND s.school_owner_id=a.school_owner_id AND s.class_name=cl.name AND s.status='Active' AND (a.stream='*' OR a.stream=s.stream) AND cl.subjects ? a.subject
+       WHERE a.id=$1 AND a.school_owner_id=$3 AND a.publication_status='published'`,
+      [c.req.param("id"), context.studentId, context.schoolId],
+    );
+    if (!assignment.rowCount)
+      return c.json({ error: "Assignment not available to this student." }, 404);
+    if (
+      assignment.rows[0].due_at &&
+      new Date(assignment.rows[0].due_at) < new Date() &&
+      !assignment.rows[0].allow_late
+    )
+      return c.json({ error: "The due date has passed." }, 409);
+    const result = await pool.query(
+      `INSERT INTO school_lms_submissions(school_owner_id,assignment_id,student_id,response_text,status)
+       VALUES($1,$2,$3,$4,'submitted') ON CONFLICT(assignment_id,student_id) DO UPDATE
+       SET response_text=EXCLUDED.response_text,status='submitted',marks=NULL,feedback='',submitted_at=now(),marked_by=NULL,marked_at=NULL
+       WHERE $5::boolean RETURNING id,status,submitted_at AS "submittedAt"`,
+      [
+        context.schoolId,
+        c.req.param("id"),
+        context.studentId,
+        responseText,
+        assignment.rows[0].allow_resubmit,
+      ],
+    );
+    if (!result.rowCount)
+      return c.json(
+        { error: "This assignment has already been submitted and resubmission is disabled." },
+        409,
+      );
+    return c.json(result.rows[0], 201);
+  });
+
+  app.get("/api/lms/assignments/:id/submissions", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to view assignment submissions." }, 403);
+    const assignment = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assignments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (
+      !assignment.rowCount ||
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        assignment.rows[0].class_id,
+        assignment.rows[0].subject,
+        assignment.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assignment not found or outside your permissions." }, 404);
+    const result = await pool.query(
+      `SELECT sub.id,sub.student_id AS "studentId",s.admission_no AS "admissionNo",s.first_name AS "firstName",s.last_name AS "lastName",sub.response_text AS "responseText",sub.status,sub.marks,sub.feedback,sub.submitted_at AS "submittedAt"
+       FROM school_lms_submissions sub JOIN school_students s ON s.id=sub.student_id AND s.school_owner_id=sub.school_owner_id
+       WHERE sub.school_owner_id=$1 AND sub.assignment_id=$2 ORDER BY s.last_name,s.first_name`,
+      [context.schoolId, c.req.param("id")],
+    );
+    return c.json(result.rows);
+  });
+
+  app.post("/api/lms/assignments/:id/submissions/:submissionId/mark", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to mark assignments." }, 403);
+    const assignment = await pool.query(
+      "SELECT class_id,subject,stream,max_marks FROM school_lms_assignments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (
+      !assignment.rowCount ||
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        assignment.rows[0].class_id,
+        assignment.rows[0].subject,
+        assignment.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assignment not found or outside your permissions." }, 404);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const marks = Number(body?.marks);
+    const feedback = String(body?.feedback || "").trim();
+    if (
+      !Number.isFinite(marks) ||
+      marks < 0 ||
+      marks > Number(assignment.rows[0].max_marks) ||
+      feedback.length > 5000
+    )
+      return c.json(
+        { error: "Enter marks within the assignment maximum and feedback up to 5000 characters." },
+        400,
+      );
+    const result = await pool.query(
+      `UPDATE school_lms_submissions SET marks=$4,feedback=$5,status='marked',marked_by=$6,marked_at=now()
+       WHERE id=$1 AND assignment_id=$2 AND school_owner_id=$3 RETURNING id,status,marks,feedback,marked_at AS "markedAt"`,
+      [
+        c.req.param("submissionId"),
+        c.req.param("id"),
+        context.schoolId,
+        marks,
+        feedback,
+        c.get("userId"),
+      ],
+    );
+    return result.rowCount
+      ? c.json(result.rows[0])
+      : c.json({ error: "Submission not found." }, 404);
   });
 }

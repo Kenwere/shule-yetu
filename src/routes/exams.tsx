@@ -57,9 +57,12 @@ function ExamsPage() {
   const [message, setMessage] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [printCards, setPrintCards] = useState(false);
+  const [marksLoading, setMarksLoading] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingMark, setSavingMark] = useState("");
   const marksPanelRef = useRef<HTMLElement | null>(null);
+  const reportPanelRef = useRef<HTMLElement | null>(null);
   const [draft, setDraft] = useState({
     name: "",
     className: "",
@@ -100,12 +103,26 @@ function ExamsPage() {
   useEffect(() => {
     if (!examId) {
       setMarks([]);
+      setMarksLoading(false);
       return;
     }
+    let current = true;
+    setMarks([]);
+    setMarksLoading(true);
+    setError("");
     void neonApi(`/api/exams/${examId}/marks`)
-      .then((r) => r.json())
-      .then(setMarks)
-      .catch((e) => setError(e instanceof Error ? e.message : "Could not load marks."));
+      .then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Could not load marks.");
+        if (current) setMarks(d);
+      })
+      .catch((e) => {
+        if (current) setError(e instanceof Error ? e.message : "Could not load marks.");
+      })
+      .finally(() => {
+        if (current) setMarksLoading(false);
+      });
+    return () => { current = false; };
   }, [examId]);
   useEffect(() => {
     if (examId)
@@ -113,6 +130,12 @@ function ExamsPage() {
         marksPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
       );
   }, [examId]);
+  useEffect(() => {
+    if (report)
+      requestAnimationFrame(() =>
+        reportPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+  }, [report]);
   async function create(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -175,7 +198,9 @@ function ExamsPage() {
   }
   async function viewReport(id: string) {
     setError("");
+    setMessage("");
     setReport(null);
+    setReportLoading(true);
     try {
       const r = await neonApi(`/api/exams/${id}/report`);
       const d = await r.json();
@@ -183,7 +208,18 @@ function ExamsPage() {
       setReport(d);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load ranked report.");
+    } finally {
+      setReportLoading(false);
     }
+  }
+  function openExam(id: string) {
+    setError("");
+    setMessage("");
+    setReport(null);
+    setExamId(id);
+    requestAnimationFrame(() =>
+      marksPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
   }
   async function deleteExam(exam: Exam) {
     if (!window.confirm(`Delete “${exam.name}” and all marks entered for it?`)) return;
@@ -248,13 +284,13 @@ function ExamsPage() {
                     </td>
                     <td className={tdCls}>{x.pending}</td>
                     <td className={`${tdCls} whitespace-nowrap`}>
-                      <button className={btn("ghost")} onClick={() => setExamId(x.id)}>
+                      <button className={btn("ghost")} onClick={() => openExam(x.id)}>
                         Open
                       </button>{" "}
                       {role === "Admin" && (
                         <>
-                          <button className={btn("ghost")} onClick={() => void viewReport(x.id)}>
-                            View report
+                          <button className={btn("ghost")} disabled={reportLoading} onClick={() => void viewReport(x.id)}>
+                            {reportLoading ? "Loading report…" : "View report"}
                           </button>{" "}
                           <button className={btn("bad")} onClick={() => void deleteExam(x)}>
                             Delete
@@ -267,7 +303,7 @@ function ExamsPage() {
                 {!exams.length && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-ink-soft">
-                      No exams have been created.
+                      No exams are available for your account. Teachers may only see exams for their assigned class and stream.
                     </td>
                   </tr>
                 )}
@@ -382,6 +418,7 @@ function ExamsPage() {
                 </button>
               )}
             </div>
+            {marksLoading && <p role="status" className="mb-3 text-sm text-ink-soft">Loading students and marks…</p>}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -445,10 +482,10 @@ function ExamsPage() {
                       </td>
                     </tr>
                   ))}
-                  {!marks.length && (
+                  {!marksLoading && !marks.length && (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-ink-soft">
-                        No marks are available for this exam and your assignments.
+                        No marks were created for this exam. Check that students are active and match its class and stream; teachers also need an assignment for the class, stream, and subject.
                       </td>
                     </tr>
                   )}
@@ -459,6 +496,7 @@ function ExamsPage() {
         </section>
       )}
       {report && (
+        <section ref={reportPanelRef} tabIndex={-1} aria-label={`${report.name} report`}>
         <Panel title={`${report.schoolName} - ${report.name} ranked report`} className="mt-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
             <p className="text-sm">
@@ -537,6 +575,7 @@ function ExamsPage() {
             </table>
           </div>
         </Panel>
+        </section>
       )}
     </PortalShell>
   );

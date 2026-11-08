@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { neonApi } from "@/lib/neon-api";
+import { compressImageByHalf } from "@/lib/compress-image";
 import { btn, inputCls } from "@/components/portal-ui";
 type Profile = {
   school_name: string;
@@ -91,10 +92,11 @@ function SettingsPage() {
     }
     setLogoBusy(true);
     try {
+      const compressed = await compressImageByHalf(file);
       const r = await neonApi("/api/school-profile/logo", {
         method: "POST",
-        headers: { "Content-Type": file.type },
-        body: file,
+        headers: { "Content-Type": compressed.type },
+        body: compressed,
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Could not upload logo.");

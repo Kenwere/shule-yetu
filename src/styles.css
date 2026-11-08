@@ -125,3 +125,12 @@
     font-family: var(--font-sans);
   }
 }
+@keyframes fee-chart-enter {
+  from { transform: scale(.82) rotate(-18deg); opacity: .35; }
+  to { transform: scale(1) rotate(0); opacity: 1; }
+}
+.dashboard-card { animation: fee-chart-enter 500ms cubic-bezier(.2,.8,.2,1) both; }
+.fee-chart { animation: fee-chart-enter 650ms cubic-bezier(.2,.8,.2,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .fee-chart, .dashboard-card { animation: none; }
+}

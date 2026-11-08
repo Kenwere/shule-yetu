@@ -75,6 +75,9 @@ function StudentProfile() {
         address: m.school?.address || "",
         logoUrl: m.school?.logoUrl || "",
       });
+      setTerm(
+        `${m.school?.activeTerm || "Term 1"} ${m.school?.academicYear || new Date().getFullYear()}`,
+      );
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load student profile.");
@@ -427,11 +430,29 @@ function StudentProfile() {
                 </label>
                 <label className="block text-sm">
                   Term / academic year
+                  <select
+                    className={inputCls}
+                    value={term.match(/Term [123]/)?.[0] || "Term 1"}
+                    onChange={(e) =>
+                      setTerm(
+                        `${e.target.value} ${term.match(/\d{4}/)?.[0] || new Date().getFullYear()}`,
+                      )
+                    }
+                  >
+                    {["Term 1", "Term 2", "Term 3"].map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
                   <input
                     className={inputCls}
-                    value={term}
-                    onChange={(e) => setTerm(e.target.value)}
-                    placeholder="e.g. Term 1 2027"
+                    type="number"
+                    min="2000"
+                    max="2200"
+                    aria-label="Academic year"
+                    value={term.match(/\d{4}/)?.[0] || new Date().getFullYear()}
+                    onChange={(e) =>
+                      setTerm(`${term.match(/Term [123]/)?.[0] || "Term 1"} ${e.target.value}`)
+                    }
                   />
                 </label>
                 {entry === "Payment" && (

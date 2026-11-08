@@ -25,6 +25,9 @@ export default defineConfig({
         ...(process.env.SHULE_YETU_APP_URL
           ? { SHULE_YETU_APP_URL: process.env.SHULE_YETU_APP_URL }
           : {}),
+        ...(process.env.SUPER_ADMIN_EMAILS
+          ? { SUPER_ADMIN_EMAILS: process.env.SUPER_ADMIN_EMAILS }
+          : {}),
       },
     },
   },
@@ -40,6 +43,12 @@ export default defineConfig({
       function: "hello",
       cron: "0 * * * *",
       functionPath: "/internal/sync-school-terms",
+    },
+    schoolSubscriptionBilling: {
+      type: "schedule",
+      function: "hello",
+      cron: "0 9 * * *",
+      functionPath: "/internal/run-school-billing",
     },
   },
   buckets: {

@@ -124,7 +124,13 @@ function Dashboard() {
             <Metric title="Payments recorded" value={money(stats?.paid)} />
             <Metric title="Current fee balance" value={money(stats?.balance)} />
           </section>
-          <TermFeePie paid={Number(stats?.termPaid || 0)} unpaid={Number(stats?.termUnpaid || 0)} billed={Number(stats?.termBilled || 0)} term={`${stats?.activeTerm || "Current term"} ${stats?.academicYear || ""}`} money={money} />
+          <TermFeePie
+            paid={Number(stats?.termPaid || 0)}
+            unpaid={Number(stats?.termUnpaid || 0)}
+            billed={Number(stats?.termBilled || 0)}
+            term={`${stats?.activeTerm || "Current term"} ${stats?.academicYear || ""}`}
+            money={money}
+          />
           <section className="border border-ink/10 bg-paper p-6">
             <h2 className="eyebrow mb-3 text-ink-soft">School records</h2>
             <p className="text-sm text-ink-soft">
@@ -145,7 +151,7 @@ function Dashboard() {
                 Manage
               </Link>
             </div>
-            <div className="space-y-2">
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
               {events.map((e) => (
                 <article
                   key={e.id}
@@ -173,7 +179,7 @@ function Dashboard() {
                 Manage
               </Link>
             </div>
-            <div className="space-y-2">
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
               {announcements.map((a) => (
                 <article
                   key={a.id}
@@ -196,19 +202,52 @@ function Dashboard() {
     </PortalShell>
   );
 }
-function TermFeePie({ paid, unpaid, billed, term, money }: { paid: number; unpaid: number; billed: number; term: string; money: (value: number) => string }) {
+function TermFeePie({
+  paid,
+  unpaid,
+  billed,
+  term,
+  money,
+}: {
+  paid: number;
+  unpaid: number;
+  billed: number;
+  term: string;
+  money: (value: number) => string;
+}) {
   const total = paid + unpaid;
   const percentPaid = total ? Math.min(100, (paid / total) * 100) : 0;
   return (
     <section className="border border-ink/10 bg-paper p-5">
       <h2 className="eyebrow text-ink-soft">Term fee collection · {term}</h2>
       <div className="mt-4 flex flex-wrap items-center gap-6">
-        <div role="img" aria-label={`${term}: ${money(paid)} paid and ${money(unpaid)} unpaid`} className="h-40 w-40 shrink-0 rounded-full border border-ink/15" style={{ background: total ? `conic-gradient(#c79a3b 0% ${percentPaid}%, #24483f ${percentPaid}% 100%)` : "#d6d3d1" }} />
+        <div
+          role="img"
+          aria-label={`${term}: ${money(paid)} paid and ${money(unpaid)} unpaid`}
+          className="fee-chart h-40 w-40 shrink-0 rounded-full border border-ink/15"
+          style={{
+            background: total
+              ? `conic-gradient(#c79a3b 0% ${percentPaid}%, #24483f ${percentPaid}% 100%)`
+              : "#d6d3d1",
+          }}
+        />
         <div className="space-y-3 text-sm">
-          <p className="flex items-center gap-2"><span aria-hidden className="h-3 w-3 bg-[#c79a3b]" /><span>Paid this term</span><strong>{money(paid)}</strong></p>
-          <p className="flex items-center gap-2"><span aria-hidden className="h-3 w-3 bg-[#24483f]" /><span>Unpaid this term</span><strong>{money(unpaid)}</strong></p>
+          <p className="flex items-center gap-2">
+            <span aria-hidden className="h-3 w-3 bg-[#c79a3b]" />
+            <span>Paid this term</span>
+            <strong>{money(paid)}</strong>
+          </p>
+          <p className="flex items-center gap-2">
+            <span aria-hidden className="h-3 w-3 bg-[#24483f]" />
+            <span>Unpaid this term</span>
+            <strong>{money(unpaid)}</strong>
+          </p>
           <p className="text-xs text-ink-soft">Billed this term: {money(billed)}</p>
-          {!total && <p className="text-xs text-ink-soft">No fee obligations have been recorded for this term yet.</p>}
+          {!total && (
+            <p className="text-xs text-ink-soft">
+              No fee obligations have been recorded for this term yet.
+            </p>
+          )}
         </div>
       </div>
     </section>
@@ -216,7 +255,7 @@ function TermFeePie({ paid, unpaid, billed, term, money }: { paid: number; unpai
 }
 function Metric({ title, value }: { title: string; value: string | number }) {
   return (
-    <article className="border border-ink/10 bg-paper p-5">
+    <article className="dashboard-card border border-ink/10 bg-paper p-5">
       <h2 className="eyebrow text-[10px] text-ink-soft">{title}</h2>
       <p className="mt-2 break-words font-display text-2xl sm:text-3xl">{value}</p>
     </article>

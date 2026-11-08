@@ -250,6 +250,28 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       return null;
     }
     await syncAutomaticTerm(context.schoolId);
+    if (
+      !["/api/billing", "/api/billing/invoices"].includes(c.req.path) &&
+      !c.req.path.startsWith("/api/billing/invoices/")
+    ) {
+      const subscription = await pool.query(
+        "SELECT platform_status,grace_ends_at FROM school_profiles WHERE user_id=$1",
+        [context.schoolId],
+      );
+      if (
+        subscription.rows[0]?.platform_status === "suspended" ||
+        (subscription.rows[0]?.grace_ends_at &&
+          new Date(subscription.rows[0].grace_ends_at) < new Date())
+      ) {
+        await pool.query(
+          "UPDATE school_profiles SET platform_status='suspended' WHERE user_id=$1",
+          [context.schoolId],
+        );
+        c.status(402);
+        c.header("content-type", "application/json");
+        return null;
+      }
+    }
     if (context.role !== "Admin" && !context.permissions.includes(permission)) {
       c.status(403);
       c.header("content-type", "application/json");
@@ -268,6 +290,112 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     for (const school of schools.rows) await syncAutomaticTerm(school.user_id);
     return c.json({ schoolsChecked: schools.rowCount || 0 });
   });
+  app.post("/internal/run-school-billing", async (c) => {
+    const parsed = await parseTriggerDelivery(c.req.raw);
+    if (parsed.ok === false)
+      return c.json({ error: parsed.error }, parsed.error === "invalid_body" ? 400 : 401);
+    if (parsed.invocation.type !== "schedule")
+      return c.json({ error: "Schedule trigger required." }, 400);
+    const schools =
+      await pool.query(`SELECT p.user_id,p.school_name,p.contact_email,p.billing_plan,p.billing_cycle,p.subscription_expires_at,
+      (SELECT count(*)::int FROM school_students s WHERE s.school_owner_id=p.user_id AND s.status='Active') AS students
+      FROM school_profiles p WHERE p.platform_status='active'`);
+    let created = 0,
+      reminders = 0;
+    for (const school of schools.rows) {
+      const count = Number(school.students);
+      const plan =
+        count > 1000
+          ? "Enterprise"
+          : count > 600
+            ? "Premium"
+            : count > 300
+              ? "Standard"
+              : count > 100
+                ? "Basic"
+                : "Starter";
+      const cycle = ["monthly", "termly", "annual"].includes(school.billing_cycle)
+        ? school.billing_cycle
+        : "monthly";
+      const base = (
+        { Starter: 1500, Basic: 3000, Standard: 5000, Premium: 8000 } as Record<string, number>
+      )[plan];
+      if (!base) continue;
+      const pending = await pool.query(
+        "SELECT 1 FROM school_billing_invoices WHERE school_owner_id=$1 AND status='due' LIMIT 1",
+        [school.user_id],
+      );
+      const expires = school.subscription_expires_at
+        ? new Date(school.subscription_expires_at)
+        : null;
+      if (!pending.rowCount && (!expires || expires.getTime() <= Date.now() + 7 * 86400000)) {
+        const amount = base * (cycle === "termly" ? 3 : cycle === "annual" ? 10 : 1);
+        const invoice = await pool.query(
+          `INSERT INTO school_billing_invoices(school_owner_id,invoice_number,plan,cycle,student_count,amount,due_at)
+          VALUES($1,'SY-'||to_char(now(),'YYYYMMDD')||'-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,6)),$2,$3,$4,$5,COALESCE($6::timestamptz,now()+interval '7 days'))
+          RETURNING invoice_number,due_at`,
+          [school.user_id, plan, cycle, count, amount, school.subscription_expires_at],
+        );
+        await pool.query(
+          "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,subscription_expires_at=COALESCE(subscription_expires_at,now()+interval '7 days'),grace_ends_at=COALESCE(grace_ends_at,now()+interval '14 days') WHERE user_id=$1",
+          [school.user_id, plan, cycle],
+        );
+        created++;
+        if (process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL && school.contact_email) {
+          await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: process.env.RESEND_FROM_EMAIL,
+              to: [school.contact_email],
+              subject: `Shule Yetu subscription invoice ${invoice.rows[0].invoice_number}`,
+              text: `Hello ${school.school_name}, your ${plan} ${cycle} subscription invoice is ready. Amount: KSh ${amount.toLocaleString()}. Due: ${new Date(invoice.rows[0].due_at).toLocaleDateString()}. Please pay and record the receipt in the Billing page. A seven-day grace period follows the due date.`,
+            }),
+          }).catch(() => undefined);
+        }
+      }
+      const dueSoon = await pool.query(
+        "SELECT id,invoice_number,amount,due_at FROM school_billing_invoices WHERE school_owner_id=$1 AND status='due' AND due_at<=now()+interval '3 days' AND (last_reminder_at IS NULL OR last_reminder_at<now()-interval '24 hours')",
+        [school.user_id],
+      );
+      for (const invoice of dueSoon.rows) {
+        if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL || !school.contact_email)
+          continue;
+        try {
+          const response = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: process.env.RESEND_FROM_EMAIL,
+              to: [school.contact_email],
+              subject: `Payment reminder: Shule Yetu invoice ${invoice.invoice_number}`,
+              text: `Hello ${school.school_name}, invoice ${invoice.invoice_number} for KSh ${Number(invoice.amount).toLocaleString()} is due ${new Date(invoice.due_at).toLocaleDateString()}. School access may be suspended after the seven-day grace period. Record the payment receipt on the Billing page.`,
+            }),
+          });
+          if (response.ok) {
+            await pool.query(
+              "UPDATE school_billing_invoices SET last_reminder_at=now() WHERE id=$1",
+              [invoice.id],
+            );
+            reminders++;
+          }
+        } catch {
+          /* Email reminders are optional until Resend is configured. */
+        }
+      }
+    }
+    return c.json({
+      schoolsChecked: schools.rowCount || 0,
+      invoicesCreated: created,
+      remindersSent: reminders,
+    });
+  });
   app.get("/api/me", async (c) => {
     const context = await contextFor(c);
     if (!context) return c.json({ error: "This account is not attached to a school." }, 403);
@@ -284,14 +412,64 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       );
       delete school.logo_key;
     }
+    const account = await pool.query("SELECT photo_key FROM school_staff WHERE user_id=$1", [
+      c.get("userId"),
+    ]);
+    const avatarUrl = account.rows[0]?.photo_key
+      ? await getSignedUrl(
+          s3,
+          new GetObjectCommand({ Bucket: imageBucket, Key: account.rows[0].photo_key }),
+          { expiresIn: 3600 },
+        )
+      : "";
     return c.json({
       userId: c.get("userId"),
       email: c.get("userEmail"),
       name: context.name,
       role: context.role,
       permissions: context.permissions,
+      avatarUrl,
       school,
     });
+  });
+  app.post("/api/me/photo", async (c) => {
+    const context = await contextFor(c);
+    if (!context || context.role === "Student" || context.role === "Parent")
+      return c.json({ error: "Not allowed to update this profile." }, 403);
+    const type =
+      String(c.req.header("Content-Type") || "")
+        .split(";")[0]
+        ?.toLowerCase() || "";
+    if (!["image/jpeg", "image/png", "image/webp"].includes(type))
+      return c.json({ error: "Use a JPG, PNG, or WEBP image." }, 415);
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (!bytes.length || bytes.byteLength > 5 * 1024 * 1024)
+      return c.json({ error: "Choose an image no larger than 5 MB." }, 413);
+    const key = `profiles/${context.schoolId}/${c.get("userId")}/${randomUUID()}.${type === "image/jpeg" ? "jpg" : type.slice(6)}`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: imageBucket,
+        Key: key,
+        Body: bytes,
+        ContentType: type,
+        CacheControl: "private, max-age=300",
+      }),
+    );
+    const old = await pool.query("SELECT photo_key FROM school_staff WHERE user_id=$1", [
+      c.get("userId"),
+    ]);
+    await pool.query("UPDATE school_staff SET photo_key=$2 WHERE user_id=$1", [
+      c.get("userId"),
+      key,
+    ]);
+    if (old.rows[0]?.photo_key)
+      await s3.send(new DeleteObjectCommand({ Bucket: imageBucket, Key: old.rows[0].photo_key }));
+    const avatarUrl = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: imageBucket, Key: key }),
+      { expiresIn: 3600 },
+    );
+    return c.json({ avatarUrl });
   });
 
   app.get("/api/school-profile", async (c) => {
@@ -536,6 +714,103 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         { error: "Could not save the student. Check the admission number and dates." },
         400,
       );
+    }
+  });
+  app.post("/api/students/promote", async (c) => {
+    const context = await guard(c, "edit_students");
+    if (!context) return c.json({ error: "Not allowed to promote students." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const currentClass = typeof body?.currentClass === "string" ? body.currentClass.trim() : "";
+    const action = ["suspend", "promote", "resume"].includes(String(body?.action))
+      ? String(body?.action)
+      : "";
+    const targetClass = typeof body?.targetClass === "string" ? body.targetClass.trim() : "";
+    if (
+      !currentClass ||
+      !action ||
+      (action === "promote" && (!targetClass || targetClass === currentClass))
+    )
+      return c.json({ error: "Choose a current class and a valid promotion action." }, 400);
+    const profile = await pool.query("SELECT academic_year FROM school_profiles WHERE user_id=$1", [
+      context.schoolId,
+    ]);
+    const year = String(profile.rows[0]?.academic_year || new Date().getFullYear());
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const students = await client.query(
+        "SELECT id,stream FROM school_students WHERE school_owner_id=$1 AND class_name=$2 AND status=$3 FOR UPDATE",
+        [context.schoolId, currentClass, action === "resume" ? "Suspended" : "Active"],
+      );
+      if (!students.rowCount) {
+        await client.query("COMMIT");
+        return c.json({ updated: 0, action });
+      }
+      if (action === "suspend") {
+        await client.query(
+          "UPDATE school_students SET status='Suspended' WHERE school_owner_id=$1 AND class_name=$2 AND status='Active'",
+          [context.schoolId, currentClass],
+        );
+      } else if (action === "resume") {
+        await client.query(
+          "UPDATE school_students SET status='Active' WHERE school_owner_id=$1 AND class_name=$2 AND status='Suspended'",
+          [context.schoolId, currentClass],
+        );
+      } else {
+        const destination = await client.query(
+          "SELECT streams,term1_fee,extra_fee,stream_fees FROM school_classes WHERE school_owner_id=$1 AND name=$2 FOR SHARE",
+          [context.schoolId, targetClass],
+        );
+        if (!destination.rowCount) {
+          await client.query("ROLLBACK");
+          return c.json({ error: "The destination class was not found." }, 404);
+        }
+        const streams = destination.rows[0].streams as string[];
+        if (!streams.length) {
+          await client.query("ROLLBACK");
+          return c.json({ error: "Add at least one stream to the destination class first." }, 400);
+        }
+        const term = `Term 1 ${year}`;
+        for (const student of students.rows) {
+          const stream = streams.includes(student.stream) ? student.stream : streams[0];
+          await client.query(
+            "UPDATE school_students SET class_name=$3,stream=$4 WHERE id=$1 AND school_owner_id=$2",
+            [student.id, context.schoolId, targetClass, stream],
+          );
+          const overrides = (destination.rows[0].stream_fees || {}) as Record<
+            string,
+            { term1Fee?: number | null; extraFee?: number | null }
+          >;
+          const fee = overrides[stream]?.term1Fee ?? Number(destination.rows[0].term1_fee || 0);
+          const extra = overrides[stream]?.extraFee ?? Number(destination.rows[0].extra_fee || 0);
+          await client.query(
+            `INSERT INTO school_fee_entries(school_owner_id,student_id,term,entry_type,debit,comment)
+             SELECT $1,$2,$3,'Fee obligation',$4,$5
+             WHERE NOT EXISTS(SELECT 1 FROM school_fee_entries WHERE school_owner_id=$1 AND student_id=$2 AND term=$3 AND entry_type='Fee obligation' AND comment=$5)`,
+            [
+              context.schoolId,
+              student.id,
+              term,
+              Number(fee) + Number(extra),
+              `${targetClass} term fees`,
+            ],
+          );
+        }
+      }
+      await client.query("COMMIT");
+      return c.json({
+        updated: students.rowCount || 0,
+        action,
+        term: action === "promote" ? `Term 1 ${year}` : undefined,
+      });
+    } catch {
+      await client.query("ROLLBACK");
+      return c.json(
+        { error: "Could not complete the class action. No student changes were saved." },
+        400,
+      );
+    } finally {
+      client.release();
     }
   });
   app.get("/api/students/:id", async (c) => {
@@ -1709,6 +1984,206 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     ]);
     return c.json({ ok: true });
   });
+  const planPrices: Record<string, number> = {
+    Starter: 1500,
+    Basic: 3000,
+    Standard: 5000,
+    Premium: 8000,
+    Enterprise: 0,
+  };
+  app.get("/api/billing", async (c) => {
+    const context = await guard(c, "manage_settings");
+    if (!context) return c.json({ error: "Not allowed to manage billing." }, 403);
+    const result = await pool.query(
+      `SELECT p.billing_plan AS plan,p.billing_cycle AS cycle,p.platform_status AS status,p.subscription_expires_at AS "expiresAt",p.grace_ends_at AS "graceEndsAt",
+        (SELECT count(*)::int FROM school_students s WHERE s.school_owner_id=p.user_id AND s.status='Active') AS "studentCount",
+        COALESCE((SELECT json_agg(json_build_object('id',i.id,'number',i.invoice_number,'plan',i.plan,'cycle',i.cycle,'studentCount',i.student_count,'amount',i.amount,'status',i.status,'issuedAt',i.issued_at,'dueAt',i.due_at) ORDER BY i.issued_at DESC) FROM school_billing_invoices i WHERE i.school_owner_id=p.user_id),'[]'::json) AS invoices,
+        COALESCE((SELECT json_agg(json_build_object('id',b.id,'amount',b.amount,'method',b.method,'reference',b.reference,'paidAt',b.paid_at,'status',b.status) ORDER BY b.paid_at DESC) FROM school_billing_payments b WHERE b.school_owner_id=p.user_id),'[]'::json) AS payments
+       FROM school_profiles p WHERE p.user_id=$1`,
+      [context.schoolId],
+    );
+    return c.json({ ...result.rows[0], planPrices });
+  });
+  app.post("/api/billing/invoices", async (c) => {
+    const context = await guard(c, "manage_settings");
+    if (!context) return c.json({ error: "Not allowed to create an invoice." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const plan = String(body?.plan || ""),
+      cycle = String(body?.cycle || "");
+    if (!(plan in planPrices) || !["monthly", "termly", "annual"].includes(cycle))
+      return c.json({ error: "Choose a valid subscription plan and billing cycle." }, 400);
+    const count = await pool.query(
+      "SELECT count(*)::int AS n FROM school_students WHERE school_owner_id=$1 AND status='Active'",
+      [context.schoolId],
+    );
+    const students = Number(count.rows[0].n);
+    const resolvedPlan =
+      students > 1000
+        ? "Enterprise"
+        : students > 600
+          ? "Premium"
+          : students > 300
+            ? "Standard"
+            : students > 100
+              ? "Basic"
+              : "Starter";
+    if (resolvedPlan === "Enterprise")
+      return c.json(
+        { error: "Enterprise pricing is custom. Contact Shule Yetu to issue an invoice." },
+        400,
+      );
+    const amount =
+      (planPrices[resolvedPlan] ?? 0) * (cycle === "termly" ? 3 : cycle === "annual" ? 10 : 1);
+    const invoice = await pool.query(
+      `INSERT INTO school_billing_invoices(school_owner_id,invoice_number,plan,cycle,student_count,amount,due_at)
+       VALUES($1,'SY-'||to_char(now(),'YYYYMMDD')||'-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,6)),$2,$3,$4,$5,now()+interval '7 days')
+       RETURNING id,invoice_number AS number,plan,cycle,student_count AS "studentCount",amount,status,issued_at AS "issuedAt",due_at AS "dueAt"`,
+      [context.schoolId, resolvedPlan, cycle, students, amount],
+    );
+    await pool.query(
+      "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,platform_status='active' WHERE user_id=$1",
+      [context.schoolId, resolvedPlan, cycle],
+    );
+    return c.json(invoice.rows[0], 201);
+  });
+  app.post("/api/billing/invoices/:id/pay", async (c) => {
+    const context = await guard(c, "manage_settings");
+    if (!context) return c.json({ error: "Not allowed to record a subscription payment." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const reference = String(body?.reference || "").trim();
+    const method = String(body?.method || "");
+    if (!reference || !["M-Pesa", "Bank", "Cash"].includes(method))
+      return c.json({ error: "Enter a payment reference and choose M-Pesa, bank, or cash." }, 400);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const invoice = await client.query(
+        "SELECT * FROM school_billing_invoices WHERE id=$1 AND school_owner_id=$2 AND status='due' FOR UPDATE",
+        [c.req.param("id"), context.schoolId],
+      );
+      if (!invoice.rowCount) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "Due invoice not found." }, 404);
+      }
+      const row = invoice.rows[0];
+      await client.query(
+        "INSERT INTO school_billing_payments(school_owner_id,invoice_id,amount,method,reference) VALUES($1,$2,$3,$4,$5)",
+        [context.schoolId, row.id, row.amount, method, reference],
+      );
+      await client.query("COMMIT");
+      return c.json({ ok: true, status: "pending" });
+    } catch {
+      await client.query("ROLLBACK");
+      return c.json({ error: "Could not save payment." }, 400);
+    } finally {
+      client.release();
+    }
+  });
+  const platformAdmin = (c: HonoContext<ApiEnv>) =>
+    String(process.env.SUPER_ADMIN_EMAILS || "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean)
+      .includes(
+        String(c.get("userEmail") || "")
+          .trim()
+          .toLowerCase(),
+      );
+  app.get("/api/platform/schools", async (c) => {
+    if (!platformAdmin(c))
+      return c.json(
+        { error: "Platform super-admin access is not configured for this account." },
+        403,
+      );
+    const schools = await pool.query(
+      `SELECT p.user_id AS id,p.school_name AS name,p.contact_email AS email,p.phone,p.platform_status AS status,p.billing_plan AS plan,p.billing_cycle AS cycle,
+        (SELECT count(*)::int FROM school_students s WHERE s.school_owner_id=p.user_id AND s.status='Active') AS "activeStudents",
+        (SELECT count(*)::int FROM school_staff a WHERE a.school_owner_id=p.user_id AND a.active) AS "activeStaff"
+       FROM school_profiles p ORDER BY p.school_name`,
+    );
+    return c.json({ schools });
+  });
+  app.patch("/api/platform/schools/:id", async (c) => {
+    if (!platformAdmin(c))
+      return c.json(
+        { error: "Platform super-admin access is not configured for this account." },
+        403,
+      );
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const status = String(body?.status || ""),
+      plan = String(body?.plan || "");
+    if (!["active", "suspended"].includes(status) && !(plan in planPrices))
+      return c.json({ error: "Choose a valid school status or plan." }, 400);
+    const result = await pool.query(
+      "UPDATE school_profiles SET platform_status=COALESCE(NULLIF($2,''),platform_status),billing_plan=COALESCE(NULLIF($3,''),billing_plan) WHERE user_id=$1 RETURNING user_id",
+      [
+        c.req.param("id"),
+        ["active", "suspended"].includes(status) ? status : "",
+        plan in planPrices ? plan : "",
+      ],
+    );
+    if (!result.rowCount) return c.json({ error: "School not found." }, 404);
+    return c.json({ ok: true });
+  });
+  app.get("/api/platform/payments", async (c) => {
+    if (!platformAdmin(c))
+      return c.json(
+        { error: "Platform super-admin access is not configured for this account." },
+        403,
+      );
+    const result = await pool.query(
+      `SELECT b.id,b.school_owner_id AS "schoolId",p.school_name AS "schoolName",b.invoice_id AS "invoiceId",i.invoice_number AS "invoiceNumber",b.amount,b.method,b.reference,b.paid_at AS "paidAt" FROM school_billing_payments b JOIN school_profiles p ON p.user_id=b.school_owner_id LEFT JOIN school_billing_invoices i ON i.id=b.invoice_id WHERE b.status='pending' ORDER BY b.paid_at`,
+    );
+    return c.json({ payments: result.rows });
+  });
+  app.patch("/api/platform/payments/:id", async (c) => {
+    if (!platformAdmin(c))
+      return c.json(
+        { error: "Platform super-admin access is not configured for this account." },
+        403,
+      );
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const decision = String(body?.decision || "");
+    if (!["confirm", "reject"].includes(decision))
+      return c.json({ error: "Choose confirm or reject." }, 400);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const payment = await client.query(
+        "SELECT b.id,b.school_owner_id,b.invoice_id,i.cycle FROM school_billing_payments b JOIN school_billing_invoices i ON i.id=b.invoice_id WHERE b.id=$1 AND b.status='pending' FOR UPDATE OF b,i",
+        [c.req.param("id")],
+      );
+      if (!payment.rowCount) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "Pending payment not found." }, 404);
+      }
+      const row = payment.rows[0];
+      await client.query(
+        "UPDATE school_billing_payments SET status=$2,verified_by=$3,verified_at=now() WHERE id=$1",
+        [row.id, decision === "confirm" ? "confirmed" : "rejected", c.get("userEmail")],
+      );
+      if (decision === "confirm") {
+        const duration =
+          row.cycle === "annual" ? "12 months" : row.cycle === "termly" ? "3 months" : "1 month";
+        await client.query(
+          "UPDATE school_billing_invoices SET status='paid',paid_at=now() WHERE id=$1",
+          [row.invoice_id],
+        );
+        await client.query(
+          "UPDATE school_profiles SET platform_status='active',subscription_expires_at=now()+$2::interval,grace_ends_at=now()+$2::interval+interval '7 days' WHERE user_id=$1",
+          [row.school_owner_id, duration],
+        );
+      }
+      await client.query("COMMIT");
+      return c.json({ ok: true });
+    } catch {
+      await client.query("ROLLBACK");
+      return c.json({ error: "Could not verify subscription payment." }, 400);
+    } finally {
+      client.release();
+    }
+  });
+
   app.get("/api/dashboard", async (c) => {
     const x = await guard(c, "view_students");
     if (!x) return c.json({ error: "Not allowed to view dashboard." }, 403);
@@ -1723,8 +2198,8 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         (SELECT COALESCE(sum(debit-credit),0) FROM school_fee_entries WHERE school_owner_id=sp.user_id) AS balance,
         sp.active_term AS "activeTerm",sp.academic_year AS "academicYear",
         COALESCE((SELECT sum(debit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0) AS "termBilled",
-        COALESCE((SELECT sum(credit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0) AS "termPaid",
-        GREATEST(COALESCE((SELECT sum(debit-credit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0),0) AS "termUnpaid"
+        LEAST(COALESCE((SELECT sum(debit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0),COALESCE((SELECT sum(credit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND entry_type='Payment' AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0)) AS "termPaid",
+        GREATEST(COALESCE((SELECT sum(debit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0)-COALESCE((SELECT sum(credit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND entry_type='Payment' AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0),0) AS "termUnpaid"
        FROM school_profiles sp WHERE sp.user_id=$1`,
       [x.schoolId],
     );
@@ -1853,6 +2328,244 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     );
     if (!created.rowCount) return c.json({ error: "This discussion is closed." }, 409);
     return c.json(created.rows[0], 201);
+  });
+
+  app.delete("/api/lms/topics/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to delete topics." }, 403);
+    const topic = await pool.query(
+      "SELECT class_id,subject FROM school_lms_topics WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !topic.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        topic.rows[0].class_id,
+        topic.rows[0].subject,
+        "*",
+      ))
+    )
+      return c.json({ error: "Topic not found or you are not assigned to it." }, 404);
+    await pool.query(
+      "UPDATE school_lms_materials SET topic_id=NULL WHERE topic_id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    await pool.query("DELETE FROM school_lms_topics WHERE id=$1 AND school_owner_id=$2", [
+      c.req.param("id"),
+      x.schoolId,
+    ]);
+    return c.json({ ok: true });
+  });
+  app.patch("/api/lms/materials/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to update learning materials." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const item = await pool.query(
+      "SELECT class_id,subject,stream,material_type FROM school_lms_materials WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !item.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        item.rows[0].class_id,
+        item.rows[0].subject,
+        item.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Material not found or you are not assigned to it." }, 404);
+    const title = String(body?.title || "").trim(),
+      description = String(body?.description || "").trim(),
+      content = String(body?.body || ""),
+      url = String(body?.externalUrl || "").trim(),
+      status = String(body?.status || "");
+    if (
+      !title ||
+      title.length > 180 ||
+      description.length > 3000 ||
+      !["draft", "published"].includes(status) ||
+      (item.rows[0].material_type === "note" && !content.trim())
+    )
+      return c.json({ error: "Provide a title and valid content and status." }, 400);
+    await pool.query(
+      "UPDATE school_lms_materials SET title=$3,description=$4,body=$5,external_url=$6,publication_status=$7,updated_at=now() WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId, title, description, content, url, status],
+    );
+    return c.json({ ok: true });
+  });
+  app.delete("/api/lms/materials/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to delete learning materials." }, 403);
+    const material = await pool.query(
+      "SELECT class_id,subject,stream,file_key FROM school_lms_materials WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !material.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        material.rows[0].class_id,
+        material.rows[0].subject,
+        material.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Material not found or you are not assigned to it." }, 404);
+    await pool.query(
+      "DELETE FROM school_lms_progress WHERE material_id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    await pool.query("DELETE FROM school_lms_materials WHERE id=$1 AND school_owner_id=$2", [
+      c.req.param("id"),
+      x.schoolId,
+    ]);
+    if (material.rows[0].file_key)
+      await s3.send(
+        new DeleteObjectCommand({ Bucket: imageBucket, Key: material.rows[0].file_key }),
+      );
+    return c.json({ ok: true });
+  });
+  app.delete("/api/lms/assignments/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to delete assignments." }, 403);
+    const assignment = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assignments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !assignment.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        assignment.rows[0].class_id,
+        assignment.rows[0].subject,
+        assignment.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assignment not found or you are not assigned to it." }, 404);
+    const submissions = await pool.query(
+      "SELECT 1 FROM school_lms_submissions WHERE assignment_id=$1 LIMIT 1",
+      [c.req.param("id")],
+    );
+    if (submissions.rowCount)
+      return c.json(
+        {
+          error:
+            "This assignment has student submissions, so it is kept for the student record. Edit or close it instead.",
+        },
+        409,
+      );
+    await pool.query("DELETE FROM school_lms_assignments WHERE id=$1 AND school_owner_id=$2", [
+      c.req.param("id"),
+      x.schoolId,
+    ]);
+    return c.json({ ok: true });
+  });
+  app.patch("/api/lms/assignments/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to update assignments." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const item = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assignments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !item.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        item.rows[0].class_id,
+        item.rows[0].subject,
+        item.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assignment not found or you are not assigned to it." }, 404);
+    const title = String(body?.title || "").trim(),
+      instructions = String(body?.instructions || "").trim(),
+      status = String(body?.status || "");
+    if (
+      !title ||
+      title.length > 180 ||
+      instructions.length > 10000 ||
+      !["draft", "published"].includes(status)
+    )
+      return c.json({ error: "Provide a title, instructions, and valid status." }, 400);
+    await pool.query(
+      "UPDATE school_lms_assignments SET title=$3,instructions=$4,publication_status=$5 WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId, title, instructions, status],
+    );
+    return c.json({ ok: true });
+  });
+  app.delete("/api/lms/assessments/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to delete assessments." }, 403);
+    const assessment = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !assessment.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        assessment.rows[0].class_id,
+        assessment.rows[0].subject,
+        assessment.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assessment not found or you are not assigned to it." }, 404);
+    const attempts = await pool.query(
+      "SELECT 1 FROM school_lms_attempts WHERE assessment_id=$1 LIMIT 1",
+      [c.req.param("id")],
+    );
+    if (attempts.rowCount)
+      return c.json(
+        { error: "This assessment has student attempts, so it is kept for the student record." },
+        409,
+      );
+    await pool.query("DELETE FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2", [
+      c.req.param("id"),
+      x.schoolId,
+    ]);
+    return c.json({ ok: true });
+  });
+  app.patch("/api/lms/assessments/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to update assessments." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const item = await pool.query(
+      "SELECT class_id,subject,stream FROM school_lms_assessments WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !item.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        item.rows[0].class_id,
+        item.rows[0].subject,
+        item.rows[0].stream,
+      ))
+    )
+      return c.json({ error: "Assessment not found or you are not assigned to it." }, 404);
+    const title = String(body?.title || "").trim(),
+      instructions = String(body?.instructions || "").trim(),
+      status = String(body?.status || "");
+    if (
+      !title ||
+      title.length > 180 ||
+      instructions.length > 10000 ||
+      !["draft", "published"].includes(status)
+    )
+      return c.json({ error: "Provide a title, instructions, and valid status." }, 400);
+    await pool.query(
+      "UPDATE school_lms_assessments SET title=$3,instructions=$4,publication_status=$5 WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId, title, instructions, status],
+    );
+    return c.json({ ok: true });
   });
 
   app.get("/api/lms/topics", async (c) => {

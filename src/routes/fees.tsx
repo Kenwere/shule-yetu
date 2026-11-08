@@ -36,6 +36,7 @@ function FeesPage() {
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [term, setTerm] = useState("");
+  const [academicYear, setAcademicYear] = useState(String(new Date().getFullYear()));
   const [method, setMethod] = useState("M-Pesa");
   const [receipt, setReceipt] = useState("");
   const [comment, setComment] = useState("");
@@ -54,6 +55,14 @@ function FeesPage() {
       .then((r) => r.json())
       .then((me) => setCanRecord(me.role === "Admin" || me.permissions?.includes("edit_fees")))
       .catch(() => setCanRecord(false));
+    void neonApi("/api/me")
+      .then((r) => r.json())
+      .then((me) => {
+        const year = String(me.school?.academicYear || new Date().getFullYear());
+        setAcademicYear(year);
+        setTerm(`${me.school?.activeTerm || "Term 1"} ${year}`);
+      })
+      .catch(() => setTerm(`Term 1 ${new Date().getFullYear()}`));
   }, []);
   useEffect(() => {
     if (!open || search.trim().length < 2) {
@@ -267,11 +276,26 @@ function FeesPage() {
               </label>
               <label className="block text-sm">
                 Term / academic year
+                <select
+                  className={inputCls}
+                  value={term.match(/Term [123]/)?.[0] || "Term 1"}
+                  onChange={(e) => setTerm(`${e.target.value} ${academicYear}`)}
+                >
+                  {["Term 1", "Term 2", "Term 3"].map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
                 <input
                   className={inputCls}
-                  placeholder="e.g. Term 1 2027"
-                  value={term}
-                  onChange={(e) => setTerm(e.target.value)}
+                  type="number"
+                  aria-label="Academic year"
+                  min="2000"
+                  max="2200"
+                  value={academicYear}
+                  onChange={(e) => {
+                    setAcademicYear(e.target.value);
+                    setTerm(`${term.match(/Term [123]/)?.[0] || "Term 1"} ${e.target.value}`);
+                  }}
                 />
               </label>
               <label className="block text-sm">

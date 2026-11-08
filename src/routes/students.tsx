@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Flash, Label, Panel, btn, inputCls, thCls } from "@/components/portal-ui";
 import { neonApi } from "@/lib/neon-api";
+import { compressImageByHalf } from "@/lib/compress-image";
 type Student = {
   id: string;
   adm: string;
@@ -17,7 +18,7 @@ type Student = {
   phone: string;
   address: string;
   admitted: string;
-  status: "Active" | "Inactive" | "Completed";
+  status: "Active" | "Inactive" | "Completed" | "Suspended";
 };
 type SchoolClass = { id: string; name: string; streams: string[] };
 const empty: Student = {
@@ -108,12 +109,14 @@ function StudentsPage() {
         body: JSON.stringify(form),
       });
       const saved = await response.json();
-      if (photoFile)
+      if (photoFile) {
+        const compressed = await compressImageByHalf(photoFile);
         await neonApi(`/api/students/${saved.id}/photo`, {
           method: "POST",
-          headers: { "Content-Type": photoFile.type },
-          body: photoFile,
+          headers: { "Content-Type": compressed.type },
+          body: compressed,
         });
+      }
       setFlash(`${form.first} ${form.last} saved.`);
       setForm(null);
       setPhotoFile(null);
@@ -159,7 +162,7 @@ function StudentsPage() {
         </p>
       )}
       <div className="mb-4 grid gap-4 sm:grid-cols-3">
-        {(["Active", "Inactive", "Completed"] as const).map((s) => (
+        {(["Active", "Inactive", "Completed", "Suspended"] as const).map((s) => (
           <div key={s} className="border border-ink/10 bg-paper p-4">
             <div className="eyebrow text-[10px]">{s} students</div>
             <div className="mt-1 font-display text-3xl">
@@ -318,6 +321,7 @@ function StudentsPage() {
                 <option>Active</option>
                 <option>Inactive</option>
                 <option>Completed</option>
+                <option>Suspended</option>
               </select>
             </Label>
             <div className="flex gap-2 sm:col-span-3">
@@ -351,7 +355,7 @@ function StudentsPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {["All", "Active", "Inactive", "Completed"].map((s) => (
+        {["All", "Active", "Inactive", "Completed", "Suspended"].map((s) => (
           <button
             key={s}
             onClick={() => setFilter(s)}

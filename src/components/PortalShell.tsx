@@ -6,6 +6,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { neonApi } from "@/lib/neon-api";
 import { authClient } from "@/lib/auth-client";
+import { UserRound } from "lucide-react";
 
 export function SignInRequired() {
   return (
@@ -36,7 +37,12 @@ export function PortalShell({
   actions?: ReactNode;
   children: ReactNode;
 }) {
-  const [user, setUser] = useState<{ name: string; email: string; role: string } | null>(null);
+  const [user, setUser] = useState<{
+    name: string;
+    email: string;
+    role: string;
+    avatarUrl?: string;
+  } | null>(null);
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -67,7 +73,21 @@ export function PortalShell({
             <div className="eyebrow text-[10px] text-ink-soft">{eyebrow}</div>
             <div className="truncate font-display text-lg uppercase tracking-tight">{title}</div>
           </div>
-          <div className="ml-auto flex items-center gap-3">{actions}</div>
+          <div className="ml-auto flex items-center gap-3">
+            {actions}
+            <Link
+              to="/profile"
+              aria-label="Open your profile"
+              title={user.name}
+              className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-ink/20 bg-white text-ink hover:ring-2 hover:ring-gold"
+            >
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <UserRound size={18} />
+              )}
+            </Link>
+          </div>
         </header>
         <main className="px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </SidebarInset>

@@ -14,6 +14,7 @@ import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as AnnouncementsRouteImport } from './routes/announcements'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AttendanceRouteImport } from './routes/attendance'
+import { Route as BillingRouteImport } from './routes/billing'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ExamsRouteImport } from './routes/exams'
@@ -22,6 +23,8 @@ import { Route as LmsRouteImport } from './routes/lms'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ParentRouteImport } from './routes/parent'
 import { Route as ParentLoginRouteImport } from './routes/parent-login'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as PromotionsRouteImport } from './routes/promotions'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ReportCardsRouteImport } from './routes/report-cards'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -30,6 +33,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StudentRouteImport } from './routes/student'
 import { Route as StudentLoginRouteImport } from './routes/student-login'
 import { Route as StudentsRouteImport } from './routes/students'
+import { Route as SuperAdminRouteImport } from './routes/super-admin'
 import { Route as TeachersRouteImport } from './routes/teachers'
 import { Route as ApiAskRouteImport } from './routes/api/ask'
 import { Route as ExamsExamIdRouteImport } from './routes/exams.$examId'
@@ -58,6 +62,11 @@ const AskRoute = AskRouteImport.update({
 const AttendanceRoute = AttendanceRouteImport.update({
   id: '/attendance',
   path: '/attendance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BillingRoute = BillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ClassesRoute = ClassesRouteImport.update({
@@ -100,6 +109,16 @@ const ParentLoginRoute = ParentLoginRouteImport.update({
   path: '/parent-login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PromotionsRoute = PromotionsRouteImport.update({
+  id: '/promotions',
+  path: '/promotions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
   path: '/register',
@@ -140,6 +159,11 @@ const StudentsRoute = StudentsRouteImport.update({
   path: '/students',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuperAdminRoute = SuperAdminRouteImport.update({
+  id: '/super-admin',
+  path: '/super-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeachersRoute = TeachersRouteImport.update({
   id: '/teachers',
   path: '/teachers',
@@ -167,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/announcements': typeof AnnouncementsRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
+  '/billing': typeof BillingRoute
   '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
   '/exams': typeof ExamsRouteWithChildren
@@ -175,6 +200,8 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/parent': typeof ParentRoute
   '/parent-login': typeof ParentLoginRoute
+  '/profile': typeof ProfileRoute
+  '/promotions': typeof PromotionsRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
@@ -183,6 +210,7 @@ export interface FileRoutesByFullPath {
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
+  '/super-admin': typeof SuperAdminRoute
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
   '/exams/$examId': typeof ExamsExamIdRoute
@@ -194,6 +222,7 @@ export interface FileRoutesByTo {
   '/announcements': typeof AnnouncementsRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
+  '/billing': typeof BillingRoute
   '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
   '/exams': typeof ExamsRouteWithChildren
@@ -202,6 +231,8 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/parent': typeof ParentRoute
   '/parent-login': typeof ParentLoginRoute
+  '/profile': typeof ProfileRoute
+  '/promotions': typeof PromotionsRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
@@ -210,6 +241,7 @@ export interface FileRoutesByTo {
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
+  '/super-admin': typeof SuperAdminRoute
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
   '/exams/$examId': typeof ExamsExamIdRoute
@@ -222,6 +254,7 @@ export interface FileRoutesById {
   '/announcements': typeof AnnouncementsRoute
   '/ask': typeof AskRoute
   '/attendance': typeof AttendanceRoute
+  '/billing': typeof BillingRoute
   '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
   '/exams': typeof ExamsRouteWithChildren
@@ -230,6 +263,8 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/parent': typeof ParentRoute
   '/parent-login': typeof ParentLoginRoute
+  '/profile': typeof ProfileRoute
+  '/promotions': typeof PromotionsRoute
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
@@ -238,6 +273,7 @@ export interface FileRoutesById {
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
+  '/super-admin': typeof SuperAdminRoute
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
   '/exams/$examId': typeof ExamsExamIdRoute
@@ -251,6 +287,7 @@ export interface FileRouteTypes {
     | '/announcements'
     | '/ask'
     | '/attendance'
+    | '/billing'
     | '/classes'
     | '/dashboard'
     | '/exams'
@@ -259,6 +296,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/parent'
     | '/parent-login'
+    | '/profile'
+    | '/promotions'
     | '/register'
     | '/report-cards'
     | '/reports'
@@ -267,6 +306,7 @@ export interface FileRouteTypes {
     | '/student'
     | '/student-login'
     | '/students'
+    | '/super-admin'
     | '/teachers'
     | '/api/ask'
     | '/exams/$examId'
@@ -278,6 +318,7 @@ export interface FileRouteTypes {
     | '/announcements'
     | '/ask'
     | '/attendance'
+    | '/billing'
     | '/classes'
     | '/dashboard'
     | '/exams'
@@ -286,6 +327,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/parent'
     | '/parent-login'
+    | '/profile'
+    | '/promotions'
     | '/register'
     | '/report-cards'
     | '/reports'
@@ -294,6 +337,7 @@ export interface FileRouteTypes {
     | '/student'
     | '/student-login'
     | '/students'
+    | '/super-admin'
     | '/teachers'
     | '/api/ask'
     | '/exams/$examId'
@@ -305,6 +349,7 @@ export interface FileRouteTypes {
     | '/announcements'
     | '/ask'
     | '/attendance'
+    | '/billing'
     | '/classes'
     | '/dashboard'
     | '/exams'
@@ -313,6 +358,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/parent'
     | '/parent-login'
+    | '/profile'
+    | '/promotions'
     | '/register'
     | '/report-cards'
     | '/reports'
@@ -321,6 +368,7 @@ export interface FileRouteTypes {
     | '/student'
     | '/student-login'
     | '/students'
+    | '/super-admin'
     | '/teachers'
     | '/api/ask'
     | '/exams/$examId'
@@ -333,6 +381,7 @@ export interface RootRouteChildren {
   AnnouncementsRoute: typeof AnnouncementsRoute
   AskRoute: typeof AskRoute
   AttendanceRoute: typeof AttendanceRoute
+  BillingRoute: typeof BillingRoute
   ClassesRoute: typeof ClassesRoute
   DashboardRoute: typeof DashboardRoute
   ExamsRoute: typeof ExamsRouteWithChildren
@@ -341,6 +390,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ParentRoute: typeof ParentRoute
   ParentLoginRoute: typeof ParentLoginRoute
+  ProfileRoute: typeof ProfileRoute
+  PromotionsRoute: typeof PromotionsRoute
   RegisterRoute: typeof RegisterRoute
   ReportCardsRoute: typeof ReportCardsRoute
   ReportsRoute: typeof ReportsRoute
@@ -349,6 +400,7 @@ export interface RootRouteChildren {
   StudentRoute: typeof StudentRoute
   StudentLoginRoute: typeof StudentLoginRoute
   StudentsRoute: typeof StudentsRouteWithChildren
+  SuperAdminRoute: typeof SuperAdminRoute
   TeachersRoute: typeof TeachersRoute
   ApiAskRoute: typeof ApiAskRoute
 }
@@ -388,6 +440,13 @@ declare module '@tanstack/react-router' {
       path: '/attendance'
       fullPath: '/attendance'
       preLoaderRoute: typeof AttendanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/billing': {
+      id: '/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof BillingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/classes': {
@@ -446,6 +505,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ParentLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/promotions': {
+      id: '/promotions'
+      path: '/promotions'
+      fullPath: '/promotions'
+      preLoaderRoute: typeof PromotionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/register': {
       id: '/register'
       path: '/register'
@@ -500,6 +573,13 @@ declare module '@tanstack/react-router' {
       path: '/students'
       fullPath: '/students'
       preLoaderRoute: typeof StudentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/super-admin': {
+      id: '/super-admin'
+      path: '/super-admin'
+      fullPath: '/super-admin'
+      preLoaderRoute: typeof SuperAdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/teachers': {
@@ -561,6 +641,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnnouncementsRoute: AnnouncementsRoute,
   AskRoute: AskRoute,
   AttendanceRoute: AttendanceRoute,
+  BillingRoute: BillingRoute,
   ClassesRoute: ClassesRoute,
   DashboardRoute: DashboardRoute,
   ExamsRoute: ExamsRouteWithChildren,
@@ -569,6 +650,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ParentRoute: ParentRoute,
   ParentLoginRoute: ParentLoginRoute,
+  ProfileRoute: ProfileRoute,
+  PromotionsRoute: PromotionsRoute,
   RegisterRoute: RegisterRoute,
   ReportCardsRoute: ReportCardsRoute,
   ReportsRoute: ReportsRoute,
@@ -577,6 +660,7 @@ const rootRouteChildren: RootRouteChildren = {
   StudentRoute: StudentRoute,
   StudentLoginRoute: StudentLoginRoute,
   StudentsRoute: StudentsRouteWithChildren,
+  SuperAdminRoute: SuperAdminRoute,
   TeachersRoute: TeachersRoute,
   ApiAskRoute: ApiAskRoute,
 }

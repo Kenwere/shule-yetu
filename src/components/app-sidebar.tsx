@@ -16,6 +16,9 @@ import {
   Layers,
   Megaphone,
   BookOpenCheck,
+  CreditCard,
+  ShieldCheck,
+  ArrowUpFromLine,
 } from "lucide-react";
 
 import {
@@ -48,11 +51,14 @@ type PortalUser = {
 const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboard }[] = [
   { title: "Overview", url: "/dashboard", icon: LayoutDashboard },
   { title: "Students", url: "/students", icon: GraduationCap },
+  { title: "Promotions", url: "/promotions", icon: ArrowUpFromLine },
   { title: "Announcements", url: "/announcements", icon: Megaphone },
   { title: "Fees", url: "/fees", icon: Receipt },
   { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
   { title: "Teachers", url: "/teachers", icon: Users },
   { title: "Accounts", url: "/accounts", icon: Users },
+  { title: "Billing", url: "/billing", icon: CreditCard },
+  { title: "Super admin", url: "/super-admin", icon: ShieldCheck },
   { title: "Exams & marks", url: "/exams", icon: ClipboardList },
   { title: "Learning (LMS)", url: "/lms", icon: BookOpenCheck },
   { title: "Report cards", url: "/report-cards", icon: FileText },
@@ -80,23 +86,29 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (router) => router.location.pathname });
   const [user, setUser] = useState<PortalUser | null>(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   useEffect(() => {
     void neonApi("/api/me")
       .then((r) => r.json())
       .then(setUser)
       .catch(() => setUser(null));
+    void neonApi("/api/platform/schools")
+      .then((response) => setIsPlatformAdmin(response.ok))
+      .catch(() => setIsPlatformAdmin(false));
   }, []);
 
   const isActive = (url: string) => pathname === url;
   const permissionFor: Record<string, string> = {
     "/dashboard": "view_students",
     "/students": "view_students",
+    "/promotions": "edit_students",
     "/announcements": "view_announcements",
     "/fees": "view_fees",
     "/attendance": "view_attendance",
     "/teachers": "manage_staff",
     "/accounts": "manage_staff",
+    "/billing": "manage_settings",
     "/exams": "view_exams",
     "/lms": "view_lms",
     "/report-cards": "view_exams",
@@ -107,8 +119,11 @@ export function AppSidebar() {
   const visibleItems = portalItems.filter(
     (item) =>
       user?.role !== "Student" &&
+      (item.url !== "/super-admin" || isPlatformAdmin) &&
+      (item.url === "/super-admin" || item.url === "/billing" ? user?.role === "Admin" : true) &&
       (item.url !== "/accounts" || user?.role === "Admin") &&
-      (user?.role === "Admin" ||
+      (item.url === "/super-admin" ||
+        user?.role === "Admin" ||
         (item.url === "/reports"
           ? ["view_students", "view_fees", "view_attendance", "view_exams"].some((permission) =>
               user?.permissions.includes(permission),

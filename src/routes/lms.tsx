@@ -158,6 +158,7 @@ function LearningPage() {
   const [flash, setFlash] = useState("");
   const [busy, setBusy] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [canManageLms, setCanManageLms] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -225,9 +226,11 @@ function LearningPage() {
       const classRows = (await classResponse.json()) as SchoolClass[];
       const me = (await meResponse.json()) as {
         role: string;
+        permissions?: string[];
         school?: { activeTerm?: string; academicYear?: string };
       };
       setIsAdmin(me.role === "Admin");
+      setCanManageLms(me.role === "Admin" || !!me.permissions?.includes("manage_lms"));
       if (!term && me.school?.activeTerm) setTerm(me.school.activeTerm);
       if (!academicYear && me.school?.academicYear) setAcademicYear(me.school.academicYear);
       if (me.role !== "Student") {
@@ -259,6 +262,57 @@ function LearningPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function removeLms(path: string, title: string) {
+    if (
+      !window.confirm(
+        `Delete “${title}”? Student records already submitted or attempted will be preserved.`,
+      )
+    )
+      return;
+    setError("");
+    try {
+      const response = await neonApi(path, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not delete this item.");
+      setFlash(`${title} deleted.`);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete this item.");
+    }
+  }
+  async function updateLms(
+    path: string,
+    currentTitle: string,
+    currentInstructions: string,
+    status: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    const title = window.prompt("Update title", currentTitle);
+    if (title === null) return;
+    const instructions = window.prompt("Update content or instructions", currentInstructions);
+    if (instructions === null) return;
+    try {
+      const response = await neonApi(path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...extra,
+          title,
+          instructions,
+          body: extra.body ?? instructions,
+          description: extra.description ?? instructions,
+          status,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not update this item.");
+      setFlash(`${title} updated.`);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this item.");
+    }
+  }
 
   async function createTopic(event: FormEvent) {
     event.preventDefault();
@@ -697,6 +751,30 @@ function LearningPage() {
                       {item.topic ? ` · ${item.topic}` : ""}
                     </p>
                   </div>
+                  {canManageLms && (
+                    <div className="flex gap-2">
+                      <button
+                        className="text-xs underline"
+                        onClick={() =>
+                          void updateLms(
+                            `/api/lms/materials/${item.id}`,
+                            item.title,
+                            item.type === "note" ? item.body : item.description,
+                            item.status,
+                            { externalUrl: item.externalUrl },
+                          )
+                        }
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="text-xs text-owed underline"
+                        onClick={() => void removeLms(`/api/lms/materials/${item.id}`, item.title)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                   <span className="text-xs uppercase tracking-wide text-ink-soft">
                     {item.status} · {item.type}
                   </span>
@@ -890,6 +968,31 @@ function LearningPage() {
                       questions · {item.maxMarks} marks · {item.durationMinutes} min
                     </p>
                   </div>
+                  {canManageLms && (
+                    <div className="flex gap-2">
+                      <button
+                        className="text-xs underline"
+                        onClick={() =>
+                          void updateLms(
+                            `/api/lms/assessments/${item.id}`,
+                            item.title,
+                            item.instructions,
+                            item.status,
+                          )
+                        }
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="text-xs text-owed underline"
+                        onClick={() =>
+                          void removeLms(`/api/lms/assessments/${item.id}`, item.title)
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                   <span className="text-xs uppercase text-ink-soft">{item.status}</span>
                 </div>
                 <p className="mt-1 text-xs text-ink-soft">
@@ -1285,6 +1388,31 @@ function LearningPage() {
                       {item.dueAt ? ` · due ${new Date(item.dueAt).toLocaleString()}` : ""}
                     </p>
                   </div>
+                  {canManageLms && (
+                    <div className="flex gap-2">
+                      <button
+                        className="text-xs underline"
+                        onClick={() =>
+                          void updateLms(
+                            `/api/lms/assignments/${item.id}`,
+                            item.title,
+                            item.instructions,
+                            item.status,
+                          )
+                        }
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="text-xs text-owed underline"
+                        onClick={() =>
+                          void removeLms(`/api/lms/assignments/${item.id}`, item.title)
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                   <span className="text-xs uppercase text-ink-soft">{item.status}</span>
                 </div>
                 {item.instructions && (

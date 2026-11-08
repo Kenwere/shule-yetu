@@ -1,4 +1,4 @@
-﻿import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Panel, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
@@ -48,6 +48,7 @@ export const Route = createFileRoute("/exams")({
   component: ExamsPage,
 });
 function ExamsPage() {
+  const navigate = useNavigate();
   const [role, setRole] = useState("");
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -91,7 +92,6 @@ function ExamsPage() {
           academicYear: user.school.academicYear,
           term: user.school.activeTerm || d.term,
         }));
-      setExamId((id) => (es.some((x: Exam) => x.id === id) ? id : es[0]?.id || ""));
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load exams.");
@@ -122,7 +122,9 @@ function ExamsPage() {
       .finally(() => {
         if (current) setMarksLoading(false);
       });
-    return () => { current = false; };
+    return () => {
+      current = false;
+    };
   }, [examId]);
   useEffect(() => {
     if (examId)
@@ -149,10 +151,9 @@ function ExamsPage() {
       if (!r.ok) throw new Error(d.error || "Could not create exam.");
       if (typeof d.id !== "string")
         throw new Error("Exam was saved, but the server did not return its ID.");
-      setExamId(d.id);
       setDraft({ ...draft, name: "" });
       await loadExams();
-      setExamId(d.id);
+      await navigate({ to: "/exams/$examId", params: { examId: d.id } });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create exam.");
     }
@@ -245,7 +246,11 @@ function ExamsPage() {
     <PortalShell
       eyebrow="Academics"
       title="Exams and marks"
-      actions={<button className={btn("ghost")} onClick={() => void loadExams()}>Reload exams</button>}
+      actions={
+        <button className={btn("ghost")} onClick={() => void loadExams()}>
+          Reload exams
+        </button>
+      }
     >
       {error && (
         <p role="alert" className="mb-4 text-owed">
@@ -284,12 +289,16 @@ function ExamsPage() {
                     </td>
                     <td className={tdCls}>{x.pending}</td>
                     <td className={`${tdCls} whitespace-nowrap`}>
-                      <button className={btn("ghost")} onClick={() => openExam(x.id)}>
+                      <Link className={btn("ghost")} to="/exams/$examId" params={{ examId: x.id }}>
                         Open
-                      </button>{" "}
+                      </Link>{" "}
                       {role === "Admin" && (
                         <>
-                          <button className={btn("ghost")} disabled={reportLoading} onClick={() => void viewReport(x.id)}>
+                          <button
+                            className={btn("ghost")}
+                            disabled={reportLoading}
+                            onClick={() => void viewReport(x.id)}
+                          >
                             {reportLoading ? "Loading report…" : "View report"}
                           </button>{" "}
                           <button className={btn("bad")} onClick={() => void deleteExam(x)}>
@@ -303,7 +312,8 @@ function ExamsPage() {
                 {!exams.length && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-ink-soft">
-                      No exams are available for your account. Teachers may only see exams for their assigned class and stream.
+                      No exams are available for your account. Teachers may only see exams for their
+                      assigned class and stream.
                     </td>
                   </tr>
                 )}
@@ -418,7 +428,11 @@ function ExamsPage() {
                 </button>
               )}
             </div>
-            {marksLoading && <p role="status" className="mb-3 text-sm text-ink-soft">Loading students and marks…</p>}
+            {marksLoading && (
+              <p role="status" className="mb-3 text-sm text-ink-soft">
+                Loading students and marks…
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -444,7 +458,11 @@ function ExamsPage() {
                           className="w-20 border border-input px-2 py-1"
                           value={m.score}
                           onChange={(e) =>
-                            setMarks((rows) => rows.map((row) => row.id === m.id ? { ...row, score: Number(e.target.value) } : row))
+                            setMarks((rows) =>
+                              rows.map((row) =>
+                                row.id === m.id ? { ...row, score: Number(e.target.value) } : row,
+                              ),
+                            )
                           }
                         />
                       </td>
@@ -475,7 +493,11 @@ function ExamsPage() {
                             </button>
                           </>
                         ) : (
-                          <button className={btn("ghost")} disabled={savingMark === m.id} onClick={() => void update(m, { status: "Pending" })}>
+                          <button
+                            className={btn("ghost")}
+                            disabled={savingMark === m.id}
+                            onClick={() => void update(m, { status: "Pending" })}
+                          >
                             {savingMark === m.id ? "Saving…" : "Save score for approval"}
                           </button>
                         )}
@@ -485,7 +507,9 @@ function ExamsPage() {
                   {!marksLoading && !marks.length && (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-ink-soft">
-                        No marks were created for this exam. Check that students are active and match its class and stream; teachers also need an assignment for the class, stream, and subject.
+                        No marks were created for this exam. Check that students are active and
+                        match its class and stream; teachers also need an assignment for the class,
+                        stream, and subject.
                       </td>
                     </tr>
                   )}
@@ -497,84 +521,111 @@ function ExamsPage() {
       )}
       {report && (
         <section ref={reportPanelRef} tabIndex={-1} aria-label={`${report.name} report`}>
-        <Panel title={`${report.schoolName} - ${report.name} ranked report`} className="mt-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
-            <p className="text-sm">
-              {report.className} {report.stream} - {report.term} {report.academicYear}
-            </p>
-            <div className="flex gap-2">
-              <button className={btn("ghost")} onClick={() => window.print()}>
-                Print ranked report
-              </button>
-              <button className={btn()} onClick={printExamCards}>
-                Print report cards
-              </button>
+          <Panel title={`${report.schoolName} - ${report.name} ranked report`} className="mt-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
+              <p className="text-sm">
+                {report.className} {report.stream} - {report.term} {report.academicYear}
+              </p>
+              <div className="flex gap-2">
+                <button className={btn("ghost")} onClick={() => window.print()}>
+                  Print ranked report
+                </button>
+                <button className={btn()} onClick={printExamCards}>
+                  Print report cards
+                </button>
+              </div>
             </div>
-          </div>
-          <div className={`${printCards ? "block print:block" : "hidden print:hidden"} mb-4`}>
-            {report.students.map((s) => (
-              <article key={s.id} className="mb-8 border border-ink/20 p-6 print:break-after-page">
-                <h2 className="font-display text-2xl">{report.schoolName}</h2>
-                <h3 className="mt-2 font-semibold">{report.name} report card</h3>
-                <p>{s.name} · {s.adm} · {report.className} {s.stream}</p>
-                <p>{report.term} {report.academicYear} · Position {s.position}</p>
-                <table className="mt-4 w-full text-sm">
-                  <thead><tr><th className={thCls}>Subject</th><th className={thCls}>Score</th></tr></thead>
-                  <tbody>{report.subjects.map((subject) => (
-                    <tr key={subject}><td className={tdCls}>{subject}</td><td className={tdCls}>{s.marks[subject] ?? "-"}</td></tr>
-                  ))}</tbody>
-                  <tfoot><tr><th className={tdCls}>Total</th><th className={tdCls}>{Number(s.total).toFixed(1)}</th></tr></tfoot>
-                </table>
-              </article>
-            ))}
-          </div>
-          <div className={`${printCards ? "hidden print:hidden" : "hidden print:block"} mb-4`}>
-            <p>
-              {report.className} {report.stream} - {report.term} {report.academicYear}
-            </p>
-          </div>
-          <div className={`${printCards ? "hidden print:hidden" : "overflow-x-auto"}`}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr>
-                  {["Position", "Student", "Admission", "Stream", ...report.subjects, "Total"].map(
-                    (x) => (
+            <div className={`${printCards ? "block print:block" : "hidden print:hidden"} mb-4`}>
+              {report.students.map((s) => (
+                <article
+                  key={s.id}
+                  className="mb-8 border border-ink/20 p-6 print:break-after-page"
+                >
+                  <h2 className="font-display text-2xl">{report.schoolName}</h2>
+                  <h3 className="mt-2 font-semibold">{report.name} report card</h3>
+                  <p>
+                    {s.name} · {s.adm} · {report.className} {s.stream}
+                  </p>
+                  <p>
+                    {report.term} {report.academicYear} · Position {s.position}
+                  </p>
+                  <table className="mt-4 w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th className={thCls}>Subject</th>
+                        <th className={thCls}>Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.subjects.map((subject) => (
+                        <tr key={subject}>
+                          <td className={tdCls}>{subject}</td>
+                          <td className={tdCls}>{s.marks[subject] ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <th className={tdCls}>Total</th>
+                        <th className={tdCls}>{Number(s.total).toFixed(1)}</th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </article>
+              ))}
+            </div>
+            <div className={`${printCards ? "hidden print:hidden" : "hidden print:block"} mb-4`}>
+              <p>
+                {report.className} {report.stream} - {report.term} {report.academicYear}
+              </p>
+            </div>
+            <div className={`${printCards ? "hidden print:hidden" : "overflow-x-auto"}`}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    {[
+                      "Position",
+                      "Student",
+                      "Admission",
+                      "Stream",
+                      ...report.subjects,
+                      "Total",
+                    ].map((x) => (
                       <th key={x} className={thCls}>
                         {x}
                       </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {report.students.map((s) => (
-                  <tr key={s.id}>
-                    <td className={tdCls}>{s.position}</td>
-                    <td className={tdCls}>{s.name}</td>
-                    <td className={tdCls}>{s.adm}</td>
-                    <td className={tdCls}>{s.stream}</td>
-                    {report.subjects.map((subject) => (
-                      <td key={subject} className={tdCls}>
-                        {s.marks[subject] ?? "-"}
-                      </td>
                     ))}
-                    <td className={`${tdCls} font-semibold`}>{Number(s.total).toFixed(1)}</td>
                   </tr>
-                ))}
-                {!report.students.length && (
-                  <tr>
-                    <td
-                      colSpan={report.subjects.length + 5}
-                      className="px-4 py-8 text-center text-ink-soft"
-                    >
-                      No active students are in this exam class and stream.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
+                </thead>
+                <tbody>
+                  {report.students.map((s) => (
+                    <tr key={s.id}>
+                      <td className={tdCls}>{s.position}</td>
+                      <td className={tdCls}>{s.name}</td>
+                      <td className={tdCls}>{s.adm}</td>
+                      <td className={tdCls}>{s.stream}</td>
+                      {report.subjects.map((subject) => (
+                        <td key={subject} className={tdCls}>
+                          {s.marks[subject] ?? "-"}
+                        </td>
+                      ))}
+                      <td className={`${tdCls} font-semibold`}>{Number(s.total).toFixed(1)}</td>
+                    </tr>
+                  ))}
+                  {!report.students.length && (
+                    <tr>
+                      <td
+                        colSpan={report.subjects.length + 5}
+                        className="px-4 py-8 text-center text-ink-soft"
+                      >
+                        No active students are in this exam class and stream.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
         </section>
       )}
     </PortalShell>

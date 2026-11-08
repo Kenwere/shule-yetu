@@ -40,7 +40,14 @@ function StudentProfile() {
   const { studentId } = useParams({ from: "/students/$studentId" });
   const [student, setStudent] = useState<Student | null>(null);
   const [fees, setFees] = useState<Fee[]>([]);
-  const [schoolName, setSchoolName] = useState("");
+  const [school, setSchool] = useState({
+    name: "",
+    motto: "",
+    email: "",
+    phone: "",
+    address: "",
+    logoUrl: "",
+  });
   const [error, setError] = useState("");
   const [entry, setEntry] = useState("Payment");
   const [amount, setAmount] = useState("");
@@ -60,7 +67,14 @@ function StudentProfile() {
       const m = await me.json();
       setStudent(d.student);
       setFees(d.fees);
-      setSchoolName(m.school?.school_name || "");
+      setSchool({
+        name: m.school?.school_name || "",
+        motto: m.school?.motto || "",
+        email: m.school?.contact_email || "",
+        phone: m.school?.phone || "",
+        address: m.school?.address || "",
+        logoUrl: m.school?.logoUrl || "",
+      });
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load student profile.");
@@ -123,6 +137,7 @@ function StudentProfile() {
         </>
       }
     >
+      <style>{`@page{size:A4 portrait;margin:12mm}@media print{body{background:#fff!important;color:#111!important;font-size:9pt}.student-fee-statement table{width:100%;border-collapse:collapse}.student-fee-statement th,.student-fee-statement td{border:1px solid #444;padding:5px 6px}.student-fee-statement thead{display:table-header-group}.student-fee-statement tr{break-inside:avoid}.student-fee-statement .fee-summary{border:1px solid #333;padding:8px;margin-top:8px}}`}</style>
       {error && (
         <p role="alert" className="mb-4 text-sm text-owed">
           {error}
@@ -139,9 +154,25 @@ function StudentProfile() {
               />
             </div>
           )}
-          <header className="mb-5 hidden border-b border-ink/20 pb-4 print:block">
-            <h1 className="font-display text-2xl">{schoolName || "School"}</h1>
-            <p>Student fee statement</p>
+          <header className="mb-5 hidden border-b-2 border-ink pb-4 print:block">
+            <div className="flex items-center gap-4">
+              {school.logoUrl && (
+                <img src={school.logoUrl} alt="" className="h-16 w-16 object-contain" />
+              )}
+              <div className="min-w-0 flex-1 text-center">
+                <h1 className="font-display text-2xl font-bold uppercase">
+                  {school.name || "School"}
+                </h1>
+                {school.motto && <p className="text-sm italic">{school.motto}</p>}
+                <p className="text-xs">
+                  {[school.address, school.phone, school.email].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            </div>
+            <h2 className="mt-3 border-y border-ink py-1 text-center font-semibold uppercase">
+              Student fee statement
+            </h2>
+            <p className="mt-2 text-xs">Printed: {new Date().toLocaleDateString()}</p>
           </header>
           <div className="mb-6 grid gap-4 sm:grid-cols-3 print:grid-cols-3">
             {[
@@ -161,7 +192,7 @@ function StudentProfile() {
               </div>
             ))}
           </div>
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] print:block">
+          <div className="student-fee-statement grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] print:block">
             <Panel title="Fee ledger">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -184,7 +215,7 @@ function StudentProfile() {
                     </tr>
                   </thead>
                   <tbody>
-                    {fees.map((f) => {
+                    {chronological.map((f) => {
                       const running = balances.get(f.id) ?? 0;
                       return (
                         <tr key={f.id}>
@@ -215,7 +246,7 @@ function StudentProfile() {
                   </tbody>
                 </table>
               </div>
-              <p className="mt-4 text-right text-sm font-semibold">
+              <p className="fee-summary mt-4 text-right text-sm font-semibold">
                 Current balance: {money(balance)}
               </p>
             </Panel>

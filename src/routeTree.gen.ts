@@ -24,12 +24,14 @@ import { Route as ParentLoginRouteImport } from './routes/parent-login'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ReportCardsRouteImport } from './routes/report-cards'
 import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StudentRouteImport } from './routes/student'
 import { Route as StudentLoginRouteImport } from './routes/student-login'
 import { Route as StudentsRouteImport } from './routes/students'
 import { Route as TeachersRouteImport } from './routes/teachers'
 import { Route as ApiAskRouteImport } from './routes/api/ask'
+import { Route as ExamsExamIdRouteImport } from './routes/exams.$examId'
 import { Route as StudentsStudentIdRouteImport } from './routes/students.$studentId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -107,6 +109,11 @@ const ReportsRoute = ReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -137,6 +144,11 @@ const ApiAskRoute = ApiAskRouteImport.update({
   path: '/api/ask',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExamsExamIdRoute = ExamsExamIdRouteImport.update({
+  id: '/$examId',
+  path: '/$examId',
+  getParentRoute: () => ExamsRoute,
+} as any)
 const StudentsStudentIdRoute = StudentsStudentIdRouteImport.update({
   id: '/$studentId',
   path: '/$studentId',
@@ -150,7 +162,7 @@ export interface FileRoutesByFullPath {
   '/attendance': typeof AttendanceRoute
   '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
-  '/exams': typeof ExamsRoute
+  '/exams': typeof ExamsRouteWithChildren
   '/fees': typeof FeesRoute
   '/lms': typeof LmsRoute
   '/login': typeof LoginRoute
@@ -159,12 +171,14 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
+  '/exams/$examId': typeof ExamsExamIdRoute
   '/students/$studentId': typeof StudentsStudentIdRoute
 }
 export interface FileRoutesByTo {
@@ -174,7 +188,7 @@ export interface FileRoutesByTo {
   '/attendance': typeof AttendanceRoute
   '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
-  '/exams': typeof ExamsRoute
+  '/exams': typeof ExamsRouteWithChildren
   '/fees': typeof FeesRoute
   '/lms': typeof LmsRoute
   '/login': typeof LoginRoute
@@ -183,12 +197,14 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
+  '/exams/$examId': typeof ExamsExamIdRoute
   '/students/$studentId': typeof StudentsStudentIdRoute
 }
 export interface FileRoutesById {
@@ -199,7 +215,7 @@ export interface FileRoutesById {
   '/attendance': typeof AttendanceRoute
   '/classes': typeof ClassesRoute
   '/dashboard': typeof DashboardRoute
-  '/exams': typeof ExamsRoute
+  '/exams': typeof ExamsRouteWithChildren
   '/fees': typeof FeesRoute
   '/lms': typeof LmsRoute
   '/login': typeof LoginRoute
@@ -208,12 +224,14 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/report-cards': typeof ReportCardsRoute
   '/reports': typeof ReportsRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
   '/teachers': typeof TeachersRoute
   '/api/ask': typeof ApiAskRoute
+  '/exams/$examId': typeof ExamsExamIdRoute
   '/students/$studentId': typeof StudentsStudentIdRoute
 }
 export interface FileRouteTypes {
@@ -234,12 +252,14 @@ export interface FileRouteTypes {
     | '/register'
     | '/report-cards'
     | '/reports'
+    | '/reset-password'
     | '/settings'
     | '/student'
     | '/student-login'
     | '/students'
     | '/teachers'
     | '/api/ask'
+    | '/exams/$examId'
     | '/students/$studentId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -258,12 +278,14 @@ export interface FileRouteTypes {
     | '/register'
     | '/report-cards'
     | '/reports'
+    | '/reset-password'
     | '/settings'
     | '/student'
     | '/student-login'
     | '/students'
     | '/teachers'
     | '/api/ask'
+    | '/exams/$examId'
     | '/students/$studentId'
   id:
     | '__root__'
@@ -282,12 +304,14 @@ export interface FileRouteTypes {
     | '/register'
     | '/report-cards'
     | '/reports'
+    | '/reset-password'
     | '/settings'
     | '/student'
     | '/student-login'
     | '/students'
     | '/teachers'
     | '/api/ask'
+    | '/exams/$examId'
     | '/students/$studentId'
   fileRoutesById: FileRoutesById
 }
@@ -298,7 +322,7 @@ export interface RootRouteChildren {
   AttendanceRoute: typeof AttendanceRoute
   ClassesRoute: typeof ClassesRoute
   DashboardRoute: typeof DashboardRoute
-  ExamsRoute: typeof ExamsRoute
+  ExamsRoute: typeof ExamsRouteWithChildren
   FeesRoute: typeof FeesRoute
   LmsRoute: typeof LmsRoute
   LoginRoute: typeof LoginRoute
@@ -307,6 +331,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   ReportCardsRoute: typeof ReportCardsRoute
   ReportsRoute: typeof ReportsRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   StudentRoute: typeof StudentRoute
   StudentLoginRoute: typeof StudentLoginRoute
@@ -422,6 +447,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -464,6 +496,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAskRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/exams/$examId': {
+      id: '/exams/$examId'
+      path: '/$examId'
+      fullPath: '/exams/$examId'
+      preLoaderRoute: typeof ExamsExamIdRouteImport
+      parentRoute: typeof ExamsRoute
+    }
     '/students/$studentId': {
       id: '/students/$studentId'
       path: '/$studentId'
@@ -473,6 +512,16 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ExamsRouteChildren {
+  ExamsExamIdRoute: typeof ExamsExamIdRoute
+}
+
+const ExamsRouteChildren: ExamsRouteChildren = {
+  ExamsExamIdRoute: ExamsExamIdRoute,
+}
+
+const ExamsRouteWithChildren = ExamsRoute._addFileChildren(ExamsRouteChildren)
 
 interface StudentsRouteChildren {
   StudentsStudentIdRoute: typeof StudentsStudentIdRoute
@@ -493,7 +542,7 @@ const rootRouteChildren: RootRouteChildren = {
   AttendanceRoute: AttendanceRoute,
   ClassesRoute: ClassesRoute,
   DashboardRoute: DashboardRoute,
-  ExamsRoute: ExamsRoute,
+  ExamsRoute: ExamsRouteWithChildren,
   FeesRoute: FeesRoute,
   LmsRoute: LmsRoute,
   LoginRoute: LoginRoute,
@@ -502,6 +551,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   ReportCardsRoute: ReportCardsRoute,
   ReportsRoute: ReportsRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   StudentRoute: StudentRoute,
   StudentLoginRoute: StudentLoginRoute,

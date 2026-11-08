@@ -272,7 +272,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await contextFor(c);
     if (!context) return c.json({ error: "This account is not attached to a school." }, 403);
     const profile = await pool.query(
-      `SELECT school_name, school_type, contact_email, phone, address, website, motto, vision, logo_key, academic_year AS "academicYear", active_term AS "activeTerm", term1_start_date AS "term1StartDate", term1_end_date AS "term1EndDate", term2_start_date AS "term2StartDate", term2_end_date AS "term2EndDate", term3_start_date AS "term3StartDate", term3_end_date AS "term3EndDate" FROM school_profiles WHERE user_id = $1`,
+      `SELECT school_name, school_type, contact_email, phone, address, website, motto, vision, logo_key, academic_year AS "academicYear", active_term AS "activeTerm", to_char(term1_start_date,'YYYY-MM-DD') AS "term1StartDate", to_char(term1_end_date,'YYYY-MM-DD') AS "term1EndDate", to_char(term2_start_date,'YYYY-MM-DD') AS "term2StartDate", to_char(term2_end_date,'YYYY-MM-DD') AS "term2EndDate", to_char(term3_start_date,'YYYY-MM-DD') AS "term3StartDate", to_char(term3_end_date,'YYYY-MM-DD') AS "term3EndDate" FROM school_profiles WHERE user_id = $1`,
       [context.schoolId],
     );
     const school = profile.rows[0] ?? null;
@@ -298,7 +298,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "manage_settings");
     if (!context) return c.json({ error: "Not allowed to view school settings." }, 403);
     const result = await pool.query(
-      `SELECT school_name, school_type, contact_email, phone, address, website, motto, vision, logo_key, academic_year AS "academicYear", active_term AS "activeTerm", term1_start_date AS "term1StartDate", term1_end_date AS "term1EndDate", term2_start_date AS "term2StartDate", term2_end_date AS "term2EndDate", term3_start_date AS "term3StartDate", term3_end_date AS "term3EndDate" FROM school_profiles WHERE user_id = $1`,
+      `SELECT school_name, school_type, contact_email, phone, address, website, motto, vision, logo_key, academic_year AS "academicYear", active_term AS "activeTerm", to_char(term1_start_date,'YYYY-MM-DD') AS "term1StartDate", to_char(term1_end_date,'YYYY-MM-DD') AS "term1EndDate", to_char(term2_start_date,'YYYY-MM-DD') AS "term2StartDate", to_char(term2_end_date,'YYYY-MM-DD') AS "term2EndDate", to_char(term3_start_date,'YYYY-MM-DD') AS "term3StartDate", to_char(term3_end_date,'YYYY-MM-DD') AS "term3EndDate" FROM school_profiles WHERE user_id = $1`,
       [context.schoolId],
     );
     const profile = result.rows[0] ?? null;
@@ -426,7 +426,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         [context.schoolId],
       );
       const result = await client.query(
-        `UPDATE school_profiles SET school_name=$2,school_type=$3,contact_email=$4,phone=$5,address=$6,website=$7,motto=$8,vision=$9,academic_year=$10,active_term=$11,term1_start_date=NULLIF($12,'')::date,term1_end_date=NULLIF($13,'')::date,term2_start_date=NULLIF($14,'')::date,term2_end_date=NULLIF($15,'')::date,term3_start_date=NULLIF($16,'')::date,term3_end_date=NULLIF($17,'')::date,updated_at=now() WHERE user_id=$1 RETURNING school_name,school_type,contact_email,phone,address,website,motto,vision,academic_year AS "academicYear",active_term AS "activeTerm",term1_start_date AS "term1StartDate",term1_end_date AS "term1EndDate",term2_start_date AS "term2StartDate",term2_end_date AS "term2EndDate",term3_start_date AS "term3StartDate",term3_end_date AS "term3EndDate"`,
+        `UPDATE school_profiles SET school_name=$2,school_type=$3,contact_email=$4,phone=$5,address=$6,website=$7,motto=$8,vision=$9,academic_year=$10,active_term=$11,term1_start_date=NULLIF($12,'')::date,term1_end_date=NULLIF($13,'')::date,term2_start_date=NULLIF($14,'')::date,term2_end_date=NULLIF($15,'')::date,term3_start_date=NULLIF($16,'')::date,term3_end_date=NULLIF($17,'')::date,updated_at=now() WHERE user_id=$1 RETURNING school_name,school_type,contact_email,phone,address,website,motto,vision,academic_year AS "academicYear",active_term AS "activeTerm",to_char(term1_start_date,'YYYY-MM-DD') AS "term1StartDate",to_char(term1_end_date,'YYYY-MM-DD') AS "term1EndDate",to_char(term2_start_date,'YYYY-MM-DD') AS "term2StartDate",to_char(term2_end_date,'YYYY-MM-DD') AS "term2EndDate",to_char(term3_start_date,'YYYY-MM-DD') AS "term3StartDate",to_char(term3_end_date,'YYYY-MM-DD') AS "term3EndDate"`,
         [context.schoolId, ...vals, academicYear, term, ...dates],
       );
       const previousTerm = old.rows[0]
@@ -677,7 +677,11 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       const previousBalance = Number(current.rows[0].balance);
       let debit = entry === "Debt added" ? amount : 0;
       let credit = entry === "Credit added" || entry === "Payment" ? amount : 0;
-      let details = comment;
+      let details =
+        comment ||
+        (entry === "Payment"
+          ? `Fee payment received via ${method}${typeof b.reference === "string" && b.reference.trim() ? `; receipt ${b.reference.trim()}` : ""}.`
+          : "");
       if (entry === "Balance set") {
         debit = Math.max(0, amount - previousBalance);
         credit = Math.max(0, previousBalance - amount);
@@ -741,6 +745,19 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       FROM school_students s LEFT JOIN school_fee_entries f ON f.student_id=s.id AND f.school_owner_id=s.school_owner_id
       WHERE s.school_owner_id=$1 GROUP BY s.id ORDER BY s.last_name,s.first_name`,
       [context.schoolId],
+    );
+    return c.json(result.rows);
+  });
+  app.get("/api/fee-students", async (c) => {
+    const context = await guard(c, "view_fees");
+    if (!context) return c.json({ error: "Not allowed to search fee accounts." }, 403);
+    const query = String(c.req.query("q") || "").trim();
+    if (query.length < 2) return c.json([]);
+    const result = await pool.query(
+      `SELECT id,admission_no AS adm,first_name AS first,last_name AS last,class_name AS class,stream
+       FROM school_students WHERE school_owner_id=$1 AND (admission_no ILIKE $2 OR first_name ILIKE $2 OR last_name ILIKE $2 OR (first_name||' '||last_name) ILIKE $2)
+       ORDER BY last_name,first_name LIMIT 25`,
+      [context.schoolId, `%${query}%`],
     );
     return c.json(result.rows);
   });
@@ -1045,20 +1062,29 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     try {
       await client.query("BEGIN");
       const found = await client.query(
-        "SELECT school_owner_id,email,full_name,role,permissions FROM school_invites WHERE invite_code=$1 AND lower(trim(email))=$2 AND expires_at>now() FOR UPDATE",
-        [b.code, email],
+        "SELECT school_owner_id,email,full_name,role,permissions FROM school_invites WHERE invite_code=$1 AND expires_at>now() FOR UPDATE",
+        [b.code],
       );
       if (!found.rowCount) {
         await client.query("ROLLBACK");
         return c.json(
           {
             error:
-              "Invitation is invalid, expired, or for another email. Sign up with the invited email address.",
+              "This invitation is invalid or expired. Ask the school administrator to send a new link.",
           },
           400,
         );
       }
       const i = found.rows[0];
+      if (String(i.email).trim().toLowerCase() !== email) {
+        await client.query("ROLLBACK");
+        return c.json(
+          {
+            error: `This invitation is for ${i.email}. Sign out, then sign in or register using that email address.`,
+          },
+          400,
+        );
+      }
       await client.query(
         "INSERT INTO school_staff(user_id,school_owner_id,email,full_name,role,permissions) VALUES($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT(user_id) DO UPDATE SET school_owner_id=EXCLUDED.school_owner_id,email=EXCLUDED.email,full_name=EXCLUDED.full_name,role=EXCLUDED.role,permissions=EXCLUDED.permissions,active=true",
         [
@@ -1085,7 +1111,8 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       `SELECT i.email,i.full_name AS name,i.role,p.school_name AS "schoolName" FROM school_invites i JOIN school_profiles p ON p.user_id=i.school_owner_id WHERE i.invite_code=$1 AND i.expires_at>now()`,
       [c.req.param("code")],
     );
-    if (!result.rowCount) return c.json({ error: "This invitation is invalid or has expired." }, 404);
+    if (!result.rowCount)
+      return c.json({ error: "This invitation is invalid or has expired." }, 404);
     return c.json(result.rows[0]);
   });
   app.get("/api/classes", async (c) => {
@@ -1335,7 +1362,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const x = await guard(c, "view_exams");
     if (!x) return c.json({ error: "Not allowed to view exams." }, 403);
     const r = await pool.query(
-      `SELECT e.id,e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",e.starts_on AS "startsOn",e.ends_on AS "endsOn",count(m.id) FILTER(WHERE m.status='Pending') AS pending FROM school_exams e LEFT JOIN school_marks m ON m.exam_id=e.id WHERE e.school_owner_id=$1 AND ($2='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=e.school_owner_id AND a.user_id=$3 AND c.name=e.class_name AND (a.stream=e.stream OR e.stream='*'))) GROUP BY e.id ORDER BY e.created_at DESC`,
+      `SELECT e.id,e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",e.starts_on AS "startsOn",e.ends_on AS "endsOn",(SELECT subjects FROM school_classes WHERE school_owner_id=e.school_owner_id AND name=e.class_name) AS subjects,count(m.id) FILTER(WHERE m.status='Pending') AS pending FROM school_exams e LEFT JOIN school_marks m ON m.exam_id=e.id WHERE e.school_owner_id=$1 AND ($2='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=e.school_owner_id AND a.user_id=$3 AND c.name=e.class_name AND (a.stream=e.stream OR e.stream='*'))) GROUP BY e.id ORDER BY e.created_at DESC`,
       [x.schoolId, x.role, c.get("userId")],
     );
     return c.json(r.rows);
@@ -1404,7 +1431,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const x = await guard(c, "view_exams");
     if (!x) return c.json({ error: "Not allowed." }, 403);
     const r = await pool.query(
-      `SELECT m.id,s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status FROM school_marks m JOIN school_students s ON s.id=m.student_id AND s.school_owner_id=m.school_owner_id JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.exam_id=$1 AND m.school_owner_id=$2 AND ($3='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$4 AND c.name=e.class_name AND a.stream=s.stream AND a.subjects ? m.subject)) ORDER BY s.last_name,s.first_name,m.subject`,
+      `SELECT m.id,m.student_id AS "studentId",s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status FROM school_marks m JOIN school_students s ON s.id=m.student_id AND s.school_owner_id=m.school_owner_id JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.exam_id=$1 AND m.school_owner_id=$2 AND ($3='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$4 AND c.name=e.class_name AND a.stream=s.stream AND a.subjects ? m.subject)) ORDER BY s.last_name,s.first_name,m.subject`,
       [c.req.param("id"), x.schoolId, x.role, c.get("userId")],
     );
     return c.json(r.rows);
@@ -1481,15 +1508,25 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [c.req.param("id"), x.schoolId],
     );
     const logoUrl = meta.rows[0].logoKey
-      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: meta.rows[0].logoKey }), { expiresIn: 3600 })
+      ? await getSignedUrl(
+          s3,
+          new GetObjectCommand({ Bucket: imageBucket, Key: meta.rows[0].logoKey }),
+          { expiresIn: 3600 },
+        )
       : "";
-    const cardStudents = await Promise.all(students.rows.map(async (student) => {
-      const photoUrl = student.photoKey
-        ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: student.photoKey }), { expiresIn: 3600 })
-        : "";
-      const { photoKey, ...details } = student;
-      return { ...details, photoUrl };
-    }));
+    const cardStudents = await Promise.all(
+      students.rows.map(async (student) => {
+        const photoUrl = student.photoKey
+          ? await getSignedUrl(
+              s3,
+              new GetObjectCommand({ Bucket: imageBucket, Key: student.photoKey }),
+              { expiresIn: 3600 },
+            )
+          : "";
+        const { photoKey, ...details } = student;
+        return { ...details, photoUrl };
+      }),
+    );
     return c.json({
       ...meta.rows[0],
       logoUrl,
@@ -1508,10 +1545,18 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     );
     if (!student.rowCount) return c.json({ error: "Student not found." }, 404);
     const photoUrl = student.rows[0].photoKey
-      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: student.rows[0].photoKey }), { expiresIn: 3600 })
+      ? await getSignedUrl(
+          s3,
+          new GetObjectCommand({ Bucket: imageBucket, Key: student.rows[0].photoKey }),
+          { expiresIn: 3600 },
+        )
       : "";
     const logoUrl = student.rows[0].logoKey
-      ? await getSignedUrl(s3, new GetObjectCommand({ Bucket: imageBucket, Key: student.rows[0].logoKey }), { expiresIn: 3600 })
+      ? await getSignedUrl(
+          s3,
+          new GetObjectCommand({ Bucket: imageBucket, Key: student.rows[0].logoKey }),
+          { expiresIn: 3600 },
+        )
       : "";
     const attendance = await pool.query(
       `SELECT count(*) FILTER(WHERE status='Present') AS present,count(*) FILTER(WHERE status='Absent') AS absent,count(*) FILTER(WHERE status='Late') AS late FROM school_attendance WHERE student_id=$1 AND school_owner_id=$2`,

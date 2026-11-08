@@ -58,11 +58,26 @@ function SettingsPage() {
     void neonApi("/api/school-profile")
       .then((r) => r.json())
       .then((p) => {
-        if (p) setForm({ ...blank, ...p });
+        if (p) setForm(normalizeProfile(p));
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load school settings."))
       .finally(() => setBusy(false));
   }, []);
+  function normalizeProfile(profile: Partial<Profile>): Profile {
+    const dates = [
+      "term1StartDate",
+      "term1EndDate",
+      "term2StartDate",
+      "term2EndDate",
+      "term3StartDate",
+      "term3EndDate",
+    ] as const;
+    return {
+      ...blank,
+      ...profile,
+      ...Object.fromEntries(dates.map((key) => [key, String(profile[key] || "").slice(0, 10)])),
+    } as Profile;
+  }
   function update(key: keyof Profile, value: string) {
     setForm((old) => ({ ...old, [key]: value }));
   }
@@ -121,7 +136,7 @@ function SettingsPage() {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Could not save settings.");
-      setForm((old) => ({ ...old, ...data, logoUrl: old.logoUrl }));
+      setForm((old) => normalizeProfile({ ...old, ...data, logoUrl: old.logoUrl }));
       setMessage(
         data.generatedFees
           ? "Settings saved. " +

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { neonApi } from "@/lib/neon-api";
 import { btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
@@ -28,23 +28,37 @@ function AttendancePage() {
   const [stream, setStream] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState("");
-  const load = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ date, class: className, stream });
-      const [r, cr] = await Promise.all([
-        neonApi(`/api/attendance?${params}`),
-        neonApi("/api/classes"),
-      ]);
-      setRows(await r.json());
-      setClasses(await cr.json());
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load attendance.");
-    }
-  }, [date, className, stream]);
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    void neonApi("/api/classes")
+      .then((r) => r.json())
+      .then((data) => {
+        if (active) setClasses(data);
+      })
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : "Could not load classes.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const params = new URLSearchParams({ date, class: className, stream });
+    setRows([]);
+    setError("");
+    void neonApi(`/api/attendance?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (active) setRows(data);
+      })
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : "Could not load attendance.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [date, className, stream]);
   const selected = classes.find((c) => c.name === className);
   const totals = useMemo(
     () =>

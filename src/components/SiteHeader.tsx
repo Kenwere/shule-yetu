@@ -17,7 +17,9 @@ export function SiteHeader() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-2 text-xs">
           <span>✉ info@shuleyetu.school · ☎ School community portal</span>
           <div className="flex items-center gap-5">
-            <a href="#campus">News & events</a>
+            <Link to="/" hash="campus">
+              News & events
+            </Link>
             <Link to="/parent-login">Parent login</Link>
             <Link to="/register" className="bg-gold px-3 py-2 font-bold text-ink">
               Admissions open
@@ -39,21 +41,21 @@ export function SiteHeader() {
             </div>
           </Link>
           <nav className="flex items-center gap-3 text-xs font-semibold uppercase md:gap-6">
-            <a href="#" className="hidden hover:text-gold sm:inline">
+            <Link to="/" className="hidden hover:text-gold sm:inline">
               Home
-            </a>
-            <a href="#campus" className="hidden hover:text-gold sm:inline">
+            </Link>
+            <Link to="/" hash="campus" className="hidden hover:text-gold sm:inline">
               About us
-            </a>
-            <a href="#academics" className="hidden hover:text-gold sm:inline">
+            </Link>
+            <Link to="/" hash="academics" className="hidden hover:text-gold sm:inline">
               Academics
-            </a>
-            <a href="#facilities" className="hidden hover:text-gold md:inline">
+            </Link>
+            <Link to="/" hash="facilities" className="hidden hover:text-gold md:inline">
               Facilities
-            </a>
-            <a href="#campus" className="hidden hover:text-gold md:inline">
+            </Link>
+            <Link to="/" hash="campus" className="hidden hover:text-gold md:inline">
               Gallery
-            </a>
+            </Link>
             {signedIn && (
               <Link to="/dashboard" className="hover:text-gold">
                 Dashboard

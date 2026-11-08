@@ -20,6 +20,8 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,50 +49,126 @@ function Login() {
     }
   }
 
+  async function requestPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setResetSent(false);
+    try {
+      const result = await authClient.requestPasswordReset({
+        email,
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (result.error) throw new Error(result.error.message || "Could not send reset email.");
+      setResetSent(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not send reset email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AuthShell eyebrow="Staff portal" title="Login">
-      <form onSubmit={submit}>
-        <Field
-          label="Email"
-          type="email"
-          required
-          autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <Field
-          label="Password"
-          type="password"
-          required
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        {error && (
-          <p role="alert" className="mb-3 text-sm text-owed">
-            {error}
-          </p>
+      <form onSubmit={resetMode ? requestPasswordReset : submit}>
+        {resetMode ? (
+          <>
+            <p className="mb-4 text-sm text-ink-soft">
+              Enter the email for your staff account. We’ll send a secure password reset link if it
+              matches an account.
+            </p>
+            <Field
+              label="Email"
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+            {resetSent && (
+              <p role="status" className="mb-3 text-sm text-collected">
+                If an account uses that email, a password reset message is on its way. Check your
+                inbox and spam folder.
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="mb-3 text-sm text-owed">
+                {error}
+              </p>
+            )}
+            <button className={submitClass} disabled={busy}>
+              {busy ? "Sending…" : "Send reset link"}
+            </button>
+            <button
+              type="button"
+              className="mt-4 w-full text-sm font-semibold underline underline-offset-4"
+              onClick={() => {
+                setResetMode(false);
+                setError("");
+                setResetSent(false);
+              }}
+            >
+              Back to login
+            </button>
+          </>
+        ) : (
+          <>
+            <Field
+              label="Email"
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+            <Field
+              label="Password"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            {error && (
+              <p role="alert" className="mb-3 text-sm text-owed">
+                {error}
+              </p>
+            )}
+            <button className={submitClass} disabled={busy}>
+              {busy ? "Signing in..." : "Sign in"}
+            </button>
+            <div className="mt-4 flex justify-between text-sm">
+              <button
+                type="button"
+                className="text-ink-soft hover:text-ink"
+                onClick={() => {
+                  setResetMode(true);
+                  setError("");
+                }}
+              >
+                Forgot password?
+              </button>
+              <a
+                href={
+                  new URLSearchParams(
+                    typeof window === "undefined" ? "" : window.location.search,
+                  ).get("invite")
+                    ? `/register?invite=${encodeURIComponent(new URLSearchParams(window.location.search).get("invite") || "")}`
+                    : "/register"
+                }
+                className="font-semibold hover:text-gold"
+              >
+                Register
+              </a>
+            </div>
+            <Link
+              to="/student-login"
+              className="mt-5 block text-center text-sm font-semibold underline underline-offset-4"
+            >
+              Student learning sign in
+            </Link>
+          </>
         )}
-        <button className={submitClass} disabled={busy}>
-          {busy ? "Signing in..." : "Sign in"}
-        </button>
-        <div className="mt-4 flex justify-between text-sm">
-          <a className="text-ink-soft hover:text-ink">Forgot password?</a>
-          <a
-            href={new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("invite")
-              ? `/register?invite=${encodeURIComponent(new URLSearchParams(window.location.search).get("invite") || "")}`
-              : "/register"}
-            className="font-semibold hover:text-gold"
-          >
-            Register
-          </a>
-        </div>
-        <Link
-          to="/student-login"
-          className="mt-5 block text-center text-sm font-semibold underline underline-offset-4"
-        >
-          Student learning sign in
-        </Link>
       </form>
     </AuthShell>
   );

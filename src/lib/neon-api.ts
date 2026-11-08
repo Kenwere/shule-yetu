@@ -46,6 +46,44 @@ export function saveParentToken(token: string | null) {
   if (token) window.sessionStorage.setItem(parentSessionKey, token);
   else window.sessionStorage.removeItem(parentSessionKey);
 }
+
+export async function logoutForInactivity(): Promise<string | null> {
+  const studentToken = getStudentToken();
+  const parentToken = getParentToken();
+  let staffSession = false;
+  try {
+    const session = await authClient.getSession();
+    staffSession = Boolean(session.data?.session);
+  } catch {
+    // The local and LMS sessions are still cleared below.
+  }
+  const base = apiBase ? (apiBase.endsWith("/") ? apiBase : `${apiBase}/`) : "";
+  if (base && studentToken) {
+    try {
+      await fetch(new URL("api/lms/auth/logout", base), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${studentToken}` },
+      });
+    } catch { /* Clear the local session even if the server cannot be reached. */ }
+  }
+  if (base && parentToken) {
+    try {
+      await fetch(new URL("api/lms/parent/auth/logout", base), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${parentToken}` },
+      });
+    } catch { /* Clear the local session even if the server cannot be reached. */ }
+  }
+  saveStudentToken(null);
+  saveParentToken(null);
+  if (staffSession) {
+    try { await authClient.signOut(); } catch { /* The app will still leave the protected page. */ }
+    return "/login";
+  }
+  if (studentToken) return "/student-login";
+  if (parentToken) return "/parent-login";
+  return null;
+}
 export async function parentLogin(email: string, password: string, schoolName = "") {
   if (!apiBase) throw new Error("Neon Functions URL is not configured.");
   const base = apiBase.endsWith("/") ? apiBase : `${apiBase}/`;

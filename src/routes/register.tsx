@@ -59,15 +59,34 @@ function Register() {
     setBusy(true);
     setError("");
     try {
-      const result = await authClient.signUp.email({ email, password, name });
-      if (result.error || !result.data) {
-        setError(result.error?.message ?? "Registration failed.");
-        return;
-      }
       if (inviteCode) {
-        const session = await authClient.getSession();
-        if (session.error || !session.data?.session?.token) {
-          setError("Your account was created. Sign in with this email to finish joining the school.");
+        const invitedEmail = (invitation?.email || email).normalize("NFKC").trim().toLowerCase();
+        const current = await authClient.getSession();
+        let sessionEmail = current.data?.user?.email?.normalize("NFKC").trim().toLowerCase() || "";
+        let sessionToken = current.data?.session?.token || "";
+
+        if (sessionToken && sessionEmail !== invitedEmail) {
+          await authClient.signOut();
+          sessionToken = "";
+          sessionEmail = "";
+        }
+        if (!sessionToken) {
+          const signup = await authClient.signUp.email({ email: invitedEmail, password, name });
+          if (signup.error || !signup.data) {
+            // An invited teacher may already have an account; let them use its password here.
+            const signin = await authClient.signIn.email({ email: invitedEmail, password });
+            if (signin.error || !signin.data) {
+              setError(signin.error?.message || signup.error?.message || "Could not create or sign in to the invited account.");
+              return;
+            }
+          }
+          const authenticated = await authClient.getSession();
+          sessionEmail = authenticated.data?.user?.email?.normalize("NFKC").trim().toLowerCase() || "";
+          sessionToken = authenticated.data?.session?.token || "";
+        }
+        if (!sessionToken || sessionEmail !== invitedEmail) {
+          if (sessionToken) await authClient.signOut();
+          setError(`The invitation is for ${invitedEmail}, but the active account is ${sessionEmail || "not signed in"}. Sign in with the invited email, then reopen the link.`);
           return;
         }
         await neonApi("/api/staff/accept-invite", {
@@ -76,6 +95,11 @@ function Register() {
           body: JSON.stringify({ code: inviteCode }),
         });
       } else {
+        const result = await authClient.signUp.email({ email, password, name });
+        if (result.error || !result.data) {
+          setError(result.error?.message ?? "Registration failed.");
+          return;
+        }
         await neonApi("/api/school-profile", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

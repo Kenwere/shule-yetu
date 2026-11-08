@@ -1076,11 +1076,13 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         );
       }
       const i = found.rows[0];
-      if (String(i.email).trim().toLowerCase() !== email) {
+      const invitationEmail = String(i.email).normalize("NFKC").trim().toLowerCase();
+      const signedInEmail = email.normalize("NFKC");
+      if (invitationEmail !== signedInEmail) {
         await client.query("ROLLBACK");
         return c.json(
           {
-            error: `This invitation is for ${i.email}. Sign out, then sign in or register using that email address.`,
+            error: `Invitation email: ${i.email}. Signed-in email: ${c.get("userEmail") || "not provided by the current session"}. Sign out of the other account and use the invited email.`,
           },
           400,
         );
@@ -1682,7 +1684,15 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [x.schoolId],
     );
     const r = await pool.query(
-      `SELECT (SELECT count(*) FROM school_students WHERE school_owner_id=$1 AND status='Active') AS students,(SELECT count(*) FROM school_staff WHERE school_owner_id=$1 AND active) AS staff,(SELECT COALESCE(sum(credit),0) FROM school_fee_entries WHERE school_owner_id=$1 AND entry_type='Payment') AS paid,(SELECT COALESCE(sum(debit-credit),0) FROM school_fee_entries WHERE school_owner_id=$1) AS balance`,
+      `SELECT (SELECT count(*) FROM school_students WHERE school_owner_id=sp.user_id AND status='Active') AS students,
+        (SELECT count(*) FROM school_staff WHERE school_owner_id=sp.user_id AND active) AS staff,
+        (SELECT COALESCE(sum(credit),0) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND entry_type='Payment') AS paid,
+        (SELECT COALESCE(sum(debit-credit),0) FROM school_fee_entries WHERE school_owner_id=sp.user_id) AS balance,
+        sp.active_term AS "activeTerm",sp.academic_year AS "academicYear",
+        COALESCE((SELECT sum(debit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0) AS "termBilled",
+        COALESCE((SELECT sum(credit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0) AS "termPaid",
+        GREATEST(COALESCE((SELECT sum(debit-credit) FROM school_fee_entries WHERE school_owner_id=sp.user_id AND term=concat_ws(' ',sp.active_term,sp.academic_year)),0),0) AS "termUnpaid"
+       FROM school_profiles sp WHERE sp.user_id=$1`,
       [x.schoolId],
     );
     return c.json(r.rows[0]);

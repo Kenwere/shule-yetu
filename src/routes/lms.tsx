@@ -637,6 +637,7 @@ function LearningPage() {
               setClassId(event.target.value);
               setSubject("");
               setTopicId("");
+              setSelectedQuestions([]);
               setStream(isAdmin ? "*" : nextClass?.streams?.[0] || "");
               setSelectedStudents([]);
             }}
@@ -657,6 +658,7 @@ function LearningPage() {
             onChange={(event) => {
               setSubject(event.target.value);
               setTopicId("");
+              setSelectedQuestions([]);
             }}
           >
             <option value="">Choose subject</option>
@@ -672,7 +674,7 @@ function LearningPage() {
             value={stream}
             onChange={(event) => setStream(event.target.value)}
           >
-            <option value="*">All streams (administrator)</option>
+            {isAdmin && <option value="*">All streams</option>}
             {(currentClass?.streams || []).map((item) => (
               <option key={item}>{item}</option>
             ))}
@@ -1029,6 +1031,9 @@ function LearningPage() {
                 <p className="text-xs text-ink-soft">
                   Save questions in the question bank for this class and subject first.
                 </p>
+              )}
+              {questions.some((q) => q.className === currentClass?.name && q.subject === subject) && !selectedQuestions.length && (
+                <p className="text-xs text-ink-soft">Select one or more questions above before saving the assessment.</p>
               )}
             </fieldset>
             <button

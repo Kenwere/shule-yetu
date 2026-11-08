@@ -93,8 +93,9 @@ export function AppSidebar() {
       .then((r) => r.json())
       .then(setUser)
       .catch(() => setUser(null));
-    void neonApi("/api/platform/schools")
-      .then((response) => setIsPlatformAdmin(response.ok))
+    void neonApi("/api/platform/access")
+      .then((response) => response.json())
+      .then((result: { allowed?: boolean }) => setIsPlatformAdmin(Boolean(result.allowed)))
       .catch(() => setIsPlatformAdmin(false));
   }, []);
 

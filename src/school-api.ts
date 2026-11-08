@@ -2089,6 +2089,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
           .trim()
           .toLowerCase(),
       );
+  app.get("/api/platform/access", async (c) => c.json({ allowed: platformAdmin(c) }));
   app.get("/api/platform/schools", async (c) => {
     if (!platformAdmin(c))
       return c.json(

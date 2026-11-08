@@ -115,10 +115,7 @@ function SuperAdminPage() {
         <p className="eyebrow text-ink-soft">Platform controls</p>
         <h1 className="mb-5 font-display text-3xl uppercase">Super admin</h1>
         <p className="mb-5 max-w-3xl text-sm text-ink-soft">
-          Manage school access and plan assignment across Shule Yetu. Add a comma-separated,
-          authorized email allowlist to the Neon Function environment variable{" "}
-          <code>SUPER_ADMIN_EMAILS</code> to grant platform access. This is separate from school
-          administrator roles.
+          Manage school subscriptions, access, and payment verification across Shule Yetu.
         </p>
         {error && (
           <p role="alert" className="mb-4 text-sm text-owed">

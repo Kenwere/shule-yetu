@@ -1,4 +1,4 @@
-﻿import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+﻿import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Panel, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
@@ -50,6 +50,9 @@ export const Route = createFileRoute("/exams")({
 });
 function ExamsPage() {
   const navigate = useNavigate();
+  const showingExamDetails = useRouterState({
+    select: (router) => router.location.pathname.startsWith("/exams/"),
+  });
   const [role, setRole] = useState("");
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -246,8 +249,11 @@ function ExamsPage() {
   const selected = exams.find((x) => x.id === examId);
   const visibleExams = exams.filter((exam) => {
     const year = new Date(exam.createdAt || `${exam.academicYear}-01-01`).getFullYear();
-    return examPeriod === "this" ? year === new Date().getFullYear() : year < new Date().getFullYear();
+    return examPeriod === "this"
+      ? year === new Date().getFullYear()
+      : year < new Date().getFullYear();
   });
+  if (showingExamDetails) return <Outlet />;
   return (
     <PortalShell
       eyebrow="Academics"
@@ -270,9 +276,27 @@ function ExamsPage() {
       )}
       <div className="grid gap-6 lg:grid-cols-3">
         <Panel title="School exams" className="lg:col-span-2">
-          <div className="mb-3 inline-flex rounded-md border border-ink/15 p-1 print:hidden" role="group" aria-label="Filter exams by creation year">
-            <button type="button" aria-pressed={examPeriod === "this"} className={btn(examPeriod === "this" ? "good" : "ghost")} onClick={() => setExamPeriod("this")}>This year</button>
-            <button type="button" aria-pressed={examPeriod === "previous"} className={btn(examPeriod === "previous" ? "good" : "ghost")} onClick={() => setExamPeriod("previous")}>Previous years</button>
+          <div
+            className="mb-3 inline-flex rounded-md border border-ink/15 p-1 print:hidden"
+            role="group"
+            aria-label="Filter exams by creation year"
+          >
+            <button
+              type="button"
+              aria-pressed={examPeriod === "this"}
+              className={btn(examPeriod === "this" ? "good" : "ghost")}
+              onClick={() => setExamPeriod("this")}
+            >
+              This year
+            </button>
+            <button
+              type="button"
+              aria-pressed={examPeriod === "previous"}
+              className={btn(examPeriod === "previous" ? "good" : "ghost")}
+              onClick={() => setExamPeriod("previous")}
+            >
+              Previous years
+            </button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -322,7 +346,11 @@ function ExamsPage() {
                 {!visibleExams.length && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-ink-soft">
-                      No {examPeriod === "this" ? "exams created this year" : "exams from previous years"} are available for your account.
+                      No{" "}
+                      {examPeriod === "this"
+                        ? "exams created this year"
+                        : "exams from previous years"}{" "}
+                      are available for your account.
                     </td>
                   </tr>
                 )}

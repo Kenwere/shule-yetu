@@ -52,6 +52,7 @@ const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboar
   { title: "Fees", url: "/fees", icon: Receipt },
   { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
   { title: "Teachers", url: "/teachers", icon: Users },
+  { title: "Accounts", url: "/accounts", icon: Users },
   { title: "Exams & marks", url: "/exams", icon: ClipboardList },
   { title: "Learning (LMS)", url: "/lms", icon: BookOpenCheck },
   { title: "Report cards", url: "/report-cards", icon: FileText },
@@ -95,6 +96,7 @@ export function AppSidebar() {
     "/fees": "view_fees",
     "/attendance": "view_attendance",
     "/teachers": "manage_staff",
+    "/accounts": "manage_staff",
     "/exams": "view_exams",
     "/lms": "view_lms",
     "/report-cards": "view_exams",
@@ -105,6 +107,7 @@ export function AppSidebar() {
   const visibleItems = portalItems.filter(
     (item) =>
       user?.role !== "Student" &&
+      (item.url !== "/accounts" || user?.role === "Admin") &&
       (user?.role === "Admin" ||
         (item.url === "/reports"
           ? ["view_students", "view_fees", "view_attendance", "view_exams"].some((permission) =>
@@ -112,6 +115,8 @@ export function AppSidebar() {
             )
           : user?.permissions.includes(permissionFor[item.url as string] ?? ""))),
   );
+  const staffItems = visibleItems.filter((item) => item.url !== "/accounts");
+  const accountItems = visibleItems.filter((item) => item.url === "/accounts");
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -148,7 +153,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Staff portal</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {visibleItems.map((item) => (
+              {staffItems.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                     <Link to={item.url}>
@@ -161,6 +166,29 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {accountItems.length > 0 && (
+          <>
+            <SidebarSeparator className="opacity-60" />
+            <SidebarGroup>
+              <SidebarGroupLabel>Accounts</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {accountItems.map((item) => (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                        <Link to={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
 
         <SidebarSeparator className="opacity-60" />
 

@@ -38,7 +38,7 @@ type Credential = {
   lastName: string;
   className: string;
   stream: string;
-  temporaryPassword: string;
+  password: string;
 };
 type Question = {
   id: string;
@@ -356,8 +356,9 @@ function LearningPage() {
       setCredentials(result.credentials);
       setSelectedStudents([]);
       setFlash(
-        `Created or reset ${result.credentials.length} student account(s). Download the temporary passwords now.`,
+        `Created or reset ${result.credentials.length} permanent student password(s). Save or share them securely.`,
       );
+      window.setTimeout(() => setCredentials([]), 60_000);
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not generate student passwords.");
@@ -592,14 +593,14 @@ function LearningPage() {
   }
   function downloadCredentials() {
     const csv = [
-      "Admission number,Student,Class,Stream,Temporary password",
+      "Admission number,Student,Class,Stream,Password",
       ...credentials.map((row) =>
         [
           row.admissionNo,
           `${row.firstName} ${row.lastName}`,
           row.className,
           row.stream,
-          row.temporaryPassword,
+          row.password,
         ]
           .map((value) => `"${value.replaceAll('"', '""')}"`)
           .join(","),
@@ -1032,9 +1033,12 @@ function LearningPage() {
                   Save questions in the question bank for this class and subject first.
                 </p>
               )}
-              {questions.some((q) => q.className === currentClass?.name && q.subject === subject) && !selectedQuestions.length && (
-                <p className="text-xs text-ink-soft">Select one or more questions above before saving the assessment.</p>
-              )}
+              {questions.some((q) => q.className === currentClass?.name && q.subject === subject) &&
+                !selectedQuestions.length && (
+                  <p className="text-xs text-ink-soft">
+                    Select one or more questions above before saving the assessment.
+                  </p>
+                )}
             </fieldset>
             <button
               className={btn("primary")}
@@ -1545,8 +1549,8 @@ function LearningPage() {
             <div>
               <h2 className="eyebrow text-ink-soft">Student LMS accounts</h2>
               <p className="mt-2 text-sm text-ink-soft">
-                Generate a class password sheet or select individual students. Temporary passwords
-                are displayed only once and students must change them after signing in.
+                Generate a permanent password for each student. Passwords are shown once, then
+                disappear automatically after one minute or when you hide them.
               </p>
             </div>
             <button
@@ -1565,9 +1569,14 @@ function LearningPage() {
             <div className="mt-4 border border-gold p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm font-semibold">Temporary password sheet · download it now</p>
-                <button className={btn("ghost")} onClick={downloadCredentials}>
-                  Download CSV
-                </button>
+                <div className="flex gap-2">
+                  <button className={btn("ghost")} onClick={downloadCredentials}>
+                    Download CSV
+                  </button>
+                  <button className={btn("ghost")} onClick={() => setCredentials([])}>
+                    Hide passwords
+                  </button>
+                </div>
               </div>
               <div className="mt-3 max-h-64 overflow-auto text-xs">
                 <table className="w-full text-left">
@@ -1576,7 +1585,7 @@ function LearningPage() {
                       <th className="p-2">Admission</th>
                       <th className="p-2">Student</th>
                       <th className="p-2">Class / stream</th>
-                      <th className="p-2">Temporary password</th>
+                      <th className="p-2">Password</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1589,7 +1598,7 @@ function LearningPage() {
                         <td className="p-2">
                           {row.className} / {row.stream}
                         </td>
-                        <td className="p-2 font-mono">{row.temporaryPassword}</td>
+                        <td className="p-2 font-mono">{row.password}</td>
                       </tr>
                     ))}
                   </tbody>

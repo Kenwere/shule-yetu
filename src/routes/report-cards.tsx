@@ -102,7 +102,11 @@ function ReportCards() {
   const [search, setSearch] = useState("");
   const [marks, setMarks] = useState<Mark[]>([]);
   const [cardStudent, setCardStudent] = useState<CardStudent | null>(null);
-  const [attendance, setAttendance] = useState<{ present: number; absent: number; late: number }>({ present: 0, absent: 0, late: 0 });
+  const [attendance, setAttendance] = useState<{ present: number; absent: number; late: number }>({
+    present: 0,
+    absent: 0,
+    late: 0,
+  });
   const [report, setReport] = useState<Report | null>(null);
   const [mode, setMode] = useState<"student" | "class">("student");
   const [classFilter, setClassFilter] = useState("");
@@ -159,34 +163,77 @@ function ReportCards() {
     const value = search.trim().toLowerCase();
     if (!value) return;
     const timeout = window.setTimeout(() => {
-      const match = students.find((s) => (s.first + " " + s.last + " " + s.adm).toLowerCase().includes(value));
+      const match = students.find((s) =>
+        (s.first + " " + s.last + " " + s.adm).toLowerCase().includes(value),
+      );
       if (match && match.id !== studentId) setStudentId(match.id);
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [search, students, studentId]);
   const availableClasses = [...new Set(exams.map((exam) => exam.className))].sort();
-  const availableYears = [...new Set(exams.filter((exam) => !classFilter || exam.className === classFilter).map((exam) => exam.academicYear))].sort().reverse();
-  const availableTerms = [...new Set(exams.filter((exam) => exam.className === classFilter && exam.academicYear === yearFilter).map((exam) => exam.term))];
-  const reportExams = exams.filter((exam) => exam.className === classFilter && exam.academicYear === yearFilter && exam.term === termFilter);
+  const availableYears = [
+    ...new Set(
+      exams
+        .filter((exam) => !classFilter || exam.className === classFilter)
+        .map((exam) => exam.academicYear),
+    ),
+  ]
+    .sort()
+    .reverse();
+  const availableTerms = [
+    ...new Set(
+      exams
+        .filter((exam) => exam.className === classFilter && exam.academicYear === yearFilter)
+        .map((exam) => exam.term),
+    ),
+  ];
+  const reportExams = exams.filter(
+    (exam) =>
+      exam.className === classFilter &&
+      exam.academicYear === yearFilter &&
+      exam.term === termFilter,
+  );
   async function loadClass() {
     setError("");
     setBusy(true);
     try {
       if (!reportExams.length) throw new Error("No exams found for this class, year and term.");
-      const results = await Promise.all(reportExams.map(async (exam) => {
-        const response = await neonApi(`/api/exams/${exam.id}/report`);
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || `Could not load ${exam.name}.`);
-        return { exam, data: data as Report };
-      }));
-      const base = results[0].data;
+      const results = await Promise.all(
+        reportExams.map(async (exam) => {
+          const response = await neonApi(`/api/exams/${exam.id}/report`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || `Could not load ${exam.name}.`);
+          return { exam, data: data as Report };
+        }),
+      );
+      const base = results[0]?.data;
+      if (!base) throw new Error("No report data was returned for the selected class.");
       const merged = new Map<string, Ranked>();
-      for (const { exam, data } of results) for (const row of data.students) {
-        const entry = merged.get(row.id) || { ...row, examMarks: [] };
-        entry.examMarks = [...(entry.examMarks || []), ...Object.entries(row.marks || {}).map(([subject, score]) => ({ exam: exam.name, term: exam.term, academicYear: exam.academicYear, subject, score: Number(score), position: row.position, total: row.total, classSize: row.classSize, schoolName: data.schoolName }))];
-        merged.set(row.id, entry);
-      }
-      setReport({ ...base, name: reportExams.map((exam) => exam.name).join(", "), exams: reportExams, students: [...merged.values()] });
+      for (const { exam, data } of results)
+        for (const row of data.students) {
+          const entry = merged.get(row.id) || { ...row, examMarks: [] };
+          entry.examMarks = [
+            ...(entry.examMarks || []),
+            ...Object.entries(row.marks || {}).map(([subject, score]) => ({
+              exam: exam.name,
+              term: exam.term,
+              academicYear: exam.academicYear,
+              subject,
+              score: Number(score),
+              position: row.position,
+              total: row.total,
+              classSize: row.classSize,
+              schoolName: data.schoolName,
+            })),
+          ];
+          merged.set(row.id, entry);
+        }
+      setReport({
+        ...base,
+        name: reportExams.map((exam) => exam.name).join(", "),
+        exams: reportExams,
+        students: [...merged.values()],
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load class report.");
     } finally {
@@ -267,11 +314,70 @@ function ReportCards() {
           )}
           {mode === "class" && (
             <div className="mb-4 flex flex-wrap items-end gap-3 print:hidden">
-              <div className="w-full max-w-xs"><Label text="Class"><select className={inputCls} value={classFilter} onChange={(e) => { setClassFilter(e.target.value); const first = exams.find((exam) => exam.className === e.target.value); if (first) { setYearFilter(first.academicYear); setTermFilter(first.term); } }}>{availableClasses.map((name) => <option key={name} value={name}>{name}</option>)}</select></Label></div>
-              <div className="w-full max-w-xs"><Label text="Academic year"><select className={inputCls} value={yearFilter} onChange={(e) => { setYearFilter(e.target.value); const first = exams.find((exam) => exam.className === classFilter && exam.academicYear === e.target.value); if (first) setTermFilter(first.term); }}>{availableYears.map((year) => <option key={year}>{year}</option>)}</select></Label></div>
-              <div className="w-full max-w-xs"><Label text="Term"><select className={inputCls} value={termFilter} onChange={(e) => setTermFilter(e.target.value)}>{availableTerms.map((term) => <option key={term}>{term}</option>)}</select></Label></div>
-              <div className="w-full max-w-md text-sm">{reportExams.length} exam{reportExams.length === 1 ? "" : "s"}: {reportExams.map((exam) => exam.name).join(", ") || "none found"}</div>
-              <button className={btn()} disabled={!reportExams.length || busy} onClick={() => void loadClass()}>
+              <div className="w-full max-w-xs">
+                <Label text="Class">
+                  <select
+                    className={inputCls}
+                    value={classFilter}
+                    onChange={(e) => {
+                      setClassFilter(e.target.value);
+                      const first = exams.find((exam) => exam.className === e.target.value);
+                      if (first) {
+                        setYearFilter(first.academicYear);
+                        setTermFilter(first.term);
+                      }
+                    }}
+                  >
+                    {availableClasses.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </Label>
+              </div>
+              <div className="w-full max-w-xs">
+                <Label text="Academic year">
+                  <select
+                    className={inputCls}
+                    value={yearFilter}
+                    onChange={(e) => {
+                      setYearFilter(e.target.value);
+                      const first = exams.find(
+                        (exam) =>
+                          exam.className === classFilter && exam.academicYear === e.target.value,
+                      );
+                      if (first) setTermFilter(first.term);
+                    }}
+                  >
+                    {availableYears.map((year) => (
+                      <option key={year}>{year}</option>
+                    ))}
+                  </select>
+                </Label>
+              </div>
+              <div className="w-full max-w-xs">
+                <Label text="Term">
+                  <select
+                    className={inputCls}
+                    value={termFilter}
+                    onChange={(e) => setTermFilter(e.target.value)}
+                  >
+                    {availableTerms.map((term) => (
+                      <option key={term}>{term}</option>
+                    ))}
+                  </select>
+                </Label>
+              </div>
+              <div className="w-full max-w-md text-sm">
+                {reportExams.length} exam{reportExams.length === 1 ? "" : "s"}:{" "}
+                {reportExams.map((exam) => exam.name).join(", ") || "none found"}
+              </div>
+              <button
+                className={btn()}
+                disabled={!reportExams.length || busy}
+                onClick={() => void loadClass()}
+              >
                 {busy ? "Loading…" : "Load cards"}
               </button>
             </div>
@@ -293,6 +399,10 @@ function ReportCards() {
               {report.students.map((row) => {
                 const roster = students.find((student) => student.id === row.id);
                 const name = row.name.split(" ");
+                const gender = row.gender || roster?.gender;
+                const dob = row.dob || roster?.dob;
+                const guardian = row.guardian || roster?.guardian;
+                const phone = row.phone || roster?.phone;
                 const student: Student = {
                   id: row.id,
                   adm: row.adm,
@@ -300,35 +410,41 @@ function ReportCards() {
                   last: row.last || roster?.last || name.slice(1).join(" "),
                   class: row.class || report.className,
                   stream: row.stream,
-                  gender: row.gender || roster?.gender,
-                  dob: row.dob || roster?.dob,
-                  guardian: row.guardian || roster?.guardian,
-                  phone: row.phone || roster?.phone,
+                  ...(gender ? { gender } : {}),
+                  ...(dob ? { dob } : {}),
+                  ...(guardian ? { guardian } : {}),
+                  ...(phone ? { phone } : {}),
                 };
                 const cardDetail: CardStudent = {
                   ...student,
                   schoolName: report.schoolName,
-                  motto: report.motto,
-                  schoolEmail: report.schoolEmail,
-                  schoolPhone: report.schoolPhone,
-                  schoolAddress: report.schoolAddress,
-                  photoUrl: row.photoUrl,
-                  logoUrl: report.logoUrl,
+                  ...(report.motto ? { motto: report.motto } : {}),
+                  ...(report.schoolEmail ? { schoolEmail: report.schoolEmail } : {}),
+                  ...(report.schoolPhone ? { schoolPhone: report.schoolPhone } : {}),
+                  ...(report.schoolAddress ? { schoolAddress: report.schoolAddress } : {}),
+                  ...(row.photoUrl ? { photoUrl: row.photoUrl } : {}),
+                  ...(report.logoUrl ? { logoUrl: report.logoUrl } : {}),
                 };
-                const cardMarks: Mark[] = row.examMarks || report.subjects.flatMap((subject) => {
-                  const score = row.marks[subject];
-                  return score === undefined ? [] : [{
-                    exam: report.name,
-                    term: report.term,
-                    academicYear: report.academicYear,
-                    subject,
-                    score,
-                    position: row.position,
-                    classSize: row.classSize,
-                    total: row.total,
-                    schoolName: report.schoolName,
-                  }];
-                });
+                const cardMarks: Mark[] =
+                  row.examMarks ||
+                  report.subjects.flatMap((subject) => {
+                    const score = row.marks[subject];
+                    return score === undefined
+                      ? []
+                      : [
+                          {
+                            exam: report.name,
+                            term: report.term,
+                            academicYear: report.academicYear,
+                            subject,
+                            score,
+                            position: row.position,
+                            classSize: row.classSize,
+                            total: row.total,
+                            schoolName: report.schoolName,
+                          },
+                        ];
+                  });
                 return (
                   <StudentReportCard
                     key={row.id}
@@ -337,7 +453,11 @@ function ReportCards() {
                     logoUrl={report.logoUrl || logoUrl}
                     detail={cardDetail}
                     marks={cardMarks}
-                    attendance={{ present: Number(row.attendancePresent || 0), absent: Number(row.attendanceAbsent || 0), late: Number(row.attendanceLate || 0) }}
+                    attendance={{
+                      present: Number(row.attendancePresent || 0),
+                      absent: Number(row.attendanceAbsent || 0),
+                      late: Number(row.attendanceLate || 0),
+                    }}
                     remarks={remarks}
                     onRemark={(key, value) => setRemarks((old) => ({ ...old, [key]: value }))}
                   />

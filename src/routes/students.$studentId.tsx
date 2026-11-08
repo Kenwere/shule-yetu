@@ -91,11 +91,30 @@ function StudentProfile() {
     balances.set(fee.id, runningBalance);
   }
   const balance = runningBalance;
+  const totalBilled = chronological.reduce((sum, fee) => sum + Number(fee.debit || 0), 0);
+  const totalPaid = chronological.reduce(
+    (sum, fee) => sum + (fee.entry === "Payment" ? Number(fee.credit || 0) : 0),
+    0,
+  );
+  const totalCredits = chronological.reduce((sum, fee) => sum + Number(fee.credit || 0), 0);
+  const statementDate = (value: string) =>
+    new Date(value)
+      .toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })
+      .replaceAll(" ", "-");
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
+      const effectiveComment =
+        comment.trim() ||
+        (entry === "Adjust balance"
+          ? "Student balance adjusted by school administrator."
+          : entry === "Debt added"
+            ? "Additional fee balance recorded."
+            : entry === "Credit added"
+              ? "Fee credit adjustment recorded."
+              : `Fee payment recorded${reference.trim() ? `; receipt ${reference.trim()}` : ""}.`);
       await neonApi(`/api/students/${studentId}/fees`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -106,7 +125,7 @@ function StudentProfile() {
           date,
           method,
           reference,
-          comment,
+          comment: effectiveComment,
           requestId: crypto.randomUUID(),
         }),
       });
@@ -137,7 +156,7 @@ function StudentProfile() {
         </>
       }
     >
-      <style>{`@page{size:A4 portrait;margin:12mm}@media print{body{background:#fff!important;color:#111!important;font-size:9pt}.student-fee-statement table{width:100%;border-collapse:collapse}.student-fee-statement th,.student-fee-statement td{border:1px solid #444;padding:5px 6px}.student-fee-statement thead{display:table-header-group}.student-fee-statement tr{break-inside:avoid}.student-fee-statement .fee-summary{border:1px solid #333;padding:8px;margin-top:8px}}`}</style>
+      <style>{`@page{size:A4 portrait;margin:14mm}@media print{body{background:#fff!important;color:#111!important;font-size:9pt}div[data-side],header.sticky{display:none!important}main{padding:0!important}.fee-print-report{display:block!important;font-family:Arial,sans-serif}.fee-print-report table{width:100%;border-collapse:collapse;font:8pt Arial,sans-serif}.fee-print-report th{border-bottom:1.5px solid #111;padding:5px 3px;text-align:left}.fee-print-report td{padding:4px 3px;border-bottom:1px solid #bbb;vertical-align:top}.fee-print-report .amount{text-align:right;white-space:nowrap}.fee-print-report tr{break-inside:avoid}.fee-print-report tfoot{display:table-row-group;font-weight:bold}.fee-print-report .statement-header{border:1px dotted #555;padding:8px}.fee-print-report .statement-meta{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:16px 0 10px;font-size:8pt}.fee-print-report .statement-meta span:nth-child(even){text-align:right}.student-fee-statement{display:none!important}}`}</style>
       {error && (
         <p role="alert" className="mb-4 text-sm text-owed">
           {error}
@@ -146,7 +165,7 @@ function StudentProfile() {
       {student && (
         <>
           {student.photoUrl && (
-            <div className="mb-5 print:mb-3">
+            <div className="mb-5 print:hidden">
               <img
                 src={student.photoUrl}
                 alt={`${student.first} ${student.last}`}
@@ -154,7 +173,7 @@ function StudentProfile() {
               />
             </div>
           )}
-          <header className="mb-5 hidden border-b-2 border-ink pb-4 print:block">
+          <header className="mb-5 hidden border-b-2 border-ink pb-4 print:hidden">
             <div className="flex items-center gap-4">
               {school.logoUrl && (
                 <img src={school.logoUrl} alt="" className="h-16 w-16 object-contain" />
@@ -169,12 +188,15 @@ function StudentProfile() {
                 </p>
               </div>
             </div>
-            <h2 className="mt-3 border-y border-ink py-1 text-center font-semibold uppercase">
-              Student fee statement
+            <h2 className="mt-3 border-y-2 border-ink py-2 text-center font-display text-lg font-bold uppercase">
+              Student fee report
             </h2>
-            <p className="mt-2 text-xs">Printed: {new Date().toLocaleDateString()}</p>
+            <p className="mt-2 flex justify-between text-xs">
+              <span>Statement date: {new Date().toLocaleDateString("en-KE")}</span>
+              <span>Admission number: {student.adm}</span>
+            </p>
           </header>
-          <div className="mb-6 grid gap-4 sm:grid-cols-3 print:grid-cols-3">
+          <div className="mb-6 grid gap-4 sm:grid-cols-3 print:hidden">
             {[
               ["Admission", student.adm],
               ["Gender", student.gender || "-"],
@@ -192,21 +214,125 @@ function StudentProfile() {
               </div>
             ))}
           </div>
-          <div className="student-fee-statement grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] print:block">
-            <Panel title="Fee ledger">
+          <div className="fee-print-report hidden print:block">
+            <div className="statement-header flex items-center gap-4">
+              {school.logoUrl && (
+                <img src={school.logoUrl} alt="" className="h-20 w-20 object-contain" />
+              )}
+              <div className="flex-1 text-center">
+                <h1 className="text-xl font-medium uppercase">{school.name || "School"}</h1>
+                <h2 className="mt-3 font-mono text-xs font-bold">Statement of Account</h2>
+              </div>
+            </div>
+            <div className="statement-meta">
+              <span>
+                Account Code: <strong>{student.adm}</strong>
+              </span>
+              <span>Report Date: {statementDate(new Date().toISOString())}</span>
+            </div>
+            <p className="mb-2 font-bold">
+              {student.first} {student.last}
+            </p>
+            <p className="mb-3 text-xs">
+              {student.class} {student.stream} · Guardian: {student.guardian || "—"}
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Journal</th>
+                  <th>Description</th>
+                  <th className="amount" colSpan={3}>
+                    Amount
+                  </th>
+                </tr>
+                <tr>
+                  <th></th>
+                  <th></th>
+                  <th></th>
+                  <th className="amount">Debits</th>
+                  <th className="amount">Credits</th>
+                  <th className="amount">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chronological.map((fee) => {
+                  const running = balances.get(fee.id) ?? 0;
+                  const journal =
+                    [fee.method, fee.reference].filter(Boolean).join(" / ") || fee.entry;
+                  const description = [fee.term, fee.comment || fee.entry]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <tr key={fee.id}>
+                      <td>{statementDate(fee.date)}</td>
+                      <td>{journal}</td>
+                      <td>{description}</td>
+                      <td className="amount">
+                        {Number(fee.debit)
+                          ? Number(fee.debit).toLocaleString("en-KE", { minimumFractionDigits: 2 })
+                          : ""}
+                      </td>
+                      <td className="amount">
+                        {Number(fee.credit)
+                          ? Number(fee.credit).toLocaleString("en-KE", { minimumFractionDigits: 2 })
+                          : ""}
+                      </td>
+                      <td className="amount">
+                        {running.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!chronological.length && (
+                  <tr>
+                    <td colSpan={6}>No fee transactions recorded.</td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={3}>Total</td>
+                  <td className="amount">
+                    {totalBilled.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="amount">
+                    {totalCredits.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="amount">
+                    {balance.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="student-fee-statement grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <Panel title="Fee payment report">
+              <div className="fee-report-heading mb-4 hidden grid-cols-3 gap-2 print:grid">
+                {[
+                  ["Fees charged", totalBilled],
+                  ["Payments received", totalPaid],
+                  ["Balance due", balance],
+                ].map(([label, amount]) => (
+                  <div key={label} className="border border-ink px-3 py-2 text-center">
+                    <div className="text-[8pt] uppercase">{label}</div>
+                    <strong>{money(Number(amount))}</strong>
+                  </div>
+                ))}
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr>
                       {[
                         "Date",
-                        "Term / year",
+                        "Term",
                         "Entry",
                         "Debit",
                         "Credit",
                         "Balance",
-                        "Method / reference",
-                        "Comment",
+                        "Payment method / receipt no.",
+                        "Description / remarks",
                       ].map((h) => (
                         <th key={h} className={thCls}>
                           {h}
@@ -221,7 +347,9 @@ function StudentProfile() {
                         <tr key={f.id}>
                           <td className={tdCls}>{new Date(f.date).toLocaleDateString()}</td>
                           <td className={tdCls}>{f.term || "-"}</td>
-                          <td className={tdCls}>{f.entry}</td>
+                          <td className={tdCls}>
+                            {f.entry === "Balance set" ? "Adjust balance" : f.entry}
+                          </td>
                           <td className={tdCls}>
                             {Number(f.debit) ? money(Number(f.debit)) : "-"}
                           </td>
@@ -247,8 +375,18 @@ function StudentProfile() {
                 </table>
               </div>
               <p className="fee-summary mt-4 text-right text-sm font-semibold">
-                Current balance: {money(balance)}
+                Total billed: {money(totalBilled)} <span className="mx-2">|</span>
+                Total paid: {money(totalPaid)} <span className="mx-2">|</span>
+                Balance due: {money(balance)}
               </p>
+              <div className="fee-report-signatures mt-10 hidden grid-cols-2 gap-16 print:grid">
+                <div className="border-t border-ink pt-2 text-center text-xs">
+                  Bursar / authorized signature
+                </div>
+                <div className="border-t border-ink pt-2 text-center text-xs">
+                  Parent / guardian signature
+                </div>
+              </div>
             </Panel>
             <Panel title="Record payment or adjustment" className="print:hidden">
               <form onSubmit={save} className="space-y-3">
@@ -262,11 +400,11 @@ function StudentProfile() {
                     <option>Payment</option>
                     <option>Debt added</option>
                     <option>Credit added</option>
-                    <option>Balance set</option>
+                    <option>Adjust balance</option>
                   </select>
                 </label>
                 <label className="block text-sm">
-                  {entry === "Balance set" ? "New balance" : "Amount"}
+                  {entry === "Adjust balance" ? "New balance" : "Amount"}
                   <input
                     required
                     min="0"
@@ -322,13 +460,13 @@ function StudentProfile() {
                   </>
                 )}
                 <label className="block text-sm">
-                  {entry === "Payment" ? "Comment" : "Reason / comment"}
+                  {entry === "Payment" ? "Comment (optional)" : "Reason / comment (optional)"}
                   <textarea
-                    required={entry !== "Payment"}
                     rows={3}
                     className={inputCls}
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
+                    placeholder="Leave blank to add an automatic note"
                   />
                 </label>
                 <button className={btn()} disabled={busy}>

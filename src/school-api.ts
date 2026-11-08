@@ -626,7 +626,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "edit_fees");
     if (!context) return c.json({ error: "Not allowed to record fees." }, 403);
     const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-    const allowed = ["Payment", "Debt added", "Credit added", "Balance set"];
+    const allowed = ["Payment", "Debt added", "Credit added", "Adjust balance"];
     const entry = String(b?.entry || "");
     const amount = Number(b?.amount);
     if (
@@ -634,15 +634,22 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       !allowed.includes(entry) ||
       !Number.isFinite(amount) ||
       amount < 0 ||
-      (entry !== "Balance set" && amount <= 0)
+      (entry !== "Adjust balance" && amount <= 0)
     )
       return c.json({ error: "Choose a valid fee entry and amount." }, 400);
     const method = typeof b.method === "string" ? b.method : "";
     if (entry === "Payment" && !["M-Pesa", "Cash", "Bank", "Card", "Other"].includes(method))
       return c.json({ error: "Choose a valid payment method." }, 400);
     const comment = typeof b.comment === "string" ? b.comment.trim() : "";
-    if (entry !== "Payment" && !comment)
-      return c.json({ error: "A reason is required for fee adjustments." }, 400);
+    const reason =
+      comment ||
+      (entry === "Adjust balance"
+        ? "Student balance adjusted by school administrator."
+        : entry === "Debt added"
+          ? "Additional fee balance recorded."
+          : entry === "Credit added"
+            ? "Fee credit adjustment recorded."
+            : `Fee payment recorded${typeof b.reference === "string" && b.reference.trim() ? `; receipt ${b.reference.trim()}` : ""}.`);
     const entryDate =
       typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date)
         ? b.date
@@ -678,14 +685,14 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       let debit = entry === "Debt added" ? amount : 0;
       let credit = entry === "Credit added" || entry === "Payment" ? amount : 0;
       let details =
-        comment ||
+        reason ||
         (entry === "Payment"
           ? `Fee payment received via ${method}${typeof b.reference === "string" && b.reference.trim() ? `; receipt ${b.reference.trim()}` : ""}.`
           : "");
-      if (entry === "Balance set") {
+      if (entry === "Adjust balance") {
         debit = Math.max(0, amount - previousBalance);
         credit = Math.max(0, previousBalance - amount);
-        details = `Previous balance: KES ${previousBalance.toFixed(2)}; new balance: KES ${amount.toFixed(2)}. Reason: ${comment}`;
+        details = `Previous balance: KES ${previousBalance.toFixed(2)}; new balance: KES ${amount.toFixed(2)}. Reason: ${reason}`;
       }
       const result = await client.query(
         "INSERT INTO school_fee_entries(school_owner_id,student_id,entry_date,term,entry_type,debit,credit,method,reference,comment,request_key) VALUES($1,$2,$3::date,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id,entry_date AS date,term,entry_type AS entry,debit,credit,method,reference,comment",
@@ -839,6 +846,32 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [context.schoolId],
     );
     return c.json({ staff: result.rows, permissions: allPermissions });
+  });
+  app.get("/api/accounts", async (c) => {
+    const context = await guard(c, "manage_staff");
+    if (!context || context.role !== "Admin")
+      return c.json({ error: "Only the school administrator can view accounts." }, 403);
+    const result = await pool.query(
+      "SELECT user_id AS id,email,full_name AS name,role,permissions,active FROM school_staff WHERE school_owner_id=$1 ORDER BY role,full_name",
+      [context.schoolId],
+    );
+    return c.json({ accounts: result.rows });
+  });
+  app.patch("/api/accounts/:id", async (c) => {
+    const context = await guard(c, "manage_staff");
+    if (!context || context.role !== "Admin")
+      return c.json({ error: "Only the school administrator can update accounts." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return c.json({ error: "Enter a valid name and email address." }, 400);
+    const result = await pool.query(
+      "UPDATE school_staff SET full_name=$3,email=$4 WHERE user_id=$1 AND school_owner_id=$2 RETURNING user_id AS id,email,full_name AS name,role,active",
+      [c.req.param("id"), context.schoolId, name, email],
+    );
+    if (!result.rowCount) return c.json({ error: "Account not found in this school." }, 404);
+    return c.json(result.rows[0]);
   });
   app.post("/api/staff/invitations", async (c) => {
     const context = await guard(c, "manage_staff");
@@ -2875,7 +2908,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       lastName: string;
       className: string;
       stream: string;
-      temporaryPassword: string;
+      password: string;
     }[] = [];
     const client = await pool.connect();
     try {
@@ -2885,7 +2918,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         const digest = await hashStudentPassword(password);
         await client.query(
           `INSERT INTO school_lms_student_accounts(school_owner_id,student_id,password_hash,must_change_password,active,session_hash,session_expires_at)
-           VALUES($1,$2,$3,true,true,NULL,NULL) ON CONFLICT(student_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=true,active=true,session_hash=NULL,session_expires_at=NULL,failed_login_count=0,locked_until=NULL,updated_at=now()`,
+           VALUES($1,$2,$3,false,true,NULL,NULL) ON CONFLICT(student_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false,active=true,session_hash=NULL,session_expires_at=NULL,failed_login_count=0,locked_until=NULL,updated_at=now()`,
           [context.schoolId, student.id, digest],
         );
         credentials.push({
@@ -2894,7 +2927,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
           lastName: student.lastName,
           className: student.className,
           stream: student.stream,
-          temporaryPassword: password,
+          password,
         });
       }
       await client.query("COMMIT");
@@ -2908,7 +2941,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       {
         credentials,
         notice:
-          "Save or download this password sheet now. Temporary passwords are shown only once.",
+          "Save or download this password sheet now. These passwords do not require a first-login change.",
       },
       201,
     );

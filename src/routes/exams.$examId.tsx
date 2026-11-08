@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PortalShell } from "@/components/PortalShell";
 import { Panel, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
 import { neonApi } from "@/lib/neon-api";
@@ -64,7 +64,7 @@ function ExamMarksPage() {
   const [saving, setSaving] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -73,13 +73,20 @@ function ExamMarksPage() {
         neonApi(`/api/exams/${examId}/marks`),
         neonApi("/api/me"),
       ]);
+      for (const response of [examResponse, marksResponse, meResponse]) {
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.error || "Your account could not load this exam.");
+        }
+      }
       const [examRows, markRows, me] = await Promise.all([
         examResponse.json() as Promise<Exam[]>,
         marksResponse.json() as Promise<Mark[]>,
         meResponse.json(),
       ]);
       const found = examRows.find((item) => item.id === examId);
-      if (!found) throw new Error("This exam is unavailable or you are not assigned to its class.");
+      if (!found)
+        throw new Error("This exam is unavailable or your account is not assigned to its class.");
       setExam(found);
       setMarks(markRows);
       setRole(me.role || "");
@@ -93,10 +100,10 @@ function ExamMarksPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [examId]);
   useEffect(() => {
     void load();
-  }, [examId]);
+  }, [load]);
 
   const students = useMemo(() => {
     const groups = new Map<

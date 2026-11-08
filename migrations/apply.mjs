@@ -22,6 +22,7 @@ const migrations = [
   "0016_lms_parent_access.sql",
   "0017_billing_and_profiles.sql",
   "0018_sms_wallet.sql",
+  "0019_subscription_trials_stk.sql",
 ];
 const pool = new Pool({ connectionString, max: 1 });
 try {

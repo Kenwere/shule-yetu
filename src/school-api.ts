@@ -106,6 +106,61 @@ function escapeHtml(value: string) {
   };
   return value.replace(/[&<>"']/g, (char) => entities[char] || char);
 }
+async function startDarajaStkPush(phone: string, amount: number, reference: string, description: string) {
+  const required = [
+    "DARAJA_CONSUMER_KEY",
+    "DARAJA_CONSUMER_SECRET",
+    "DARAJA_SHORTCODE",
+    "DARAJA_PASSKEY",
+    "DARAJA_CALLBACK_URL",
+  ];
+  if (required.some((key) => !process.env[key]))
+    throw new Error("M-Pesa checkout is not configured for this app yet.");
+  const production = process.env.DARAJA_ENVIRONMENT === "production";
+  const apiHost = production ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
+  const credentials = Buffer.from(
+    `${process.env.DARAJA_CONSUMER_KEY}:${process.env.DARAJA_CONSUMER_SECRET}`,
+  ).toString("base64");
+  const tokenResponse = await fetch(`${apiHost}/oauth/v1/generate?grant_type=client_credentials`, {
+    headers: { Authorization: `Basic ${credentials}` },
+  });
+  const tokenBody = (await tokenResponse.json().catch(() => ({}))) as { access_token?: string };
+  if (!tokenResponse.ok || !tokenBody.access_token)
+    throw new Error("Could not authenticate with M-Pesa Daraja.");
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "00";
+  const timestamp = `${part("year")}${part("month")}${part("day")}${part("hour")}${part("minute")}${part("second")}`;
+  const shortcode = process.env.DARAJA_SHORTCODE!;
+  const password = Buffer.from(`${shortcode}${process.env.DARAJA_PASSKEY}${timestamp}`).toString("base64");
+  const response = await fetch(`${apiHost}/mpesa/stkpush/v1/processrequest`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${tokenBody.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      BusinessShortCode: shortcode,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: process.env.DARAJA_TRANSACTION_TYPE || "CustomerPayBillOnline",
+      Amount: Math.ceil(amount),
+      PartyA: phone,
+      PartyB: shortcode,
+      PhoneNumber: phone,
+      CallBackURL: process.env.DARAJA_CALLBACK_URL,
+      AccountReference: reference.slice(0, 12),
+      TransactionDesc: description.slice(0, 13),
+    }),
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    errorMessage?: string; CustomerMessage?: string; CheckoutRequestID?: string;
+    ResponseCode?: string; MerchantRequestID?: string;
+  };
+  if (!response.ok || result.ResponseCode !== "0" || !result.CheckoutRequestID)
+    throw new Error(result.errorMessage || result.CustomerMessage || "M-Pesa STK Push failed.");
+  return { checkoutRequestId: result.CheckoutRequestID, merchantRequestId: result.MerchantRequestID || "", message: result.CustomerMessage || "Approve the M-Pesa request on your phone." };
+}
+
 export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
   async function contextFor(c: HonoContext<ApiEnv>): Promise<SchoolContext | null> {
     const userId = c.get("userId") as string;
@@ -252,21 +307,17 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     await syncAutomaticTerm(context.schoolId);
     if (
       !["/api/billing", "/api/billing/invoices"].includes(c.req.path) &&
-      !c.req.path.startsWith("/api/billing/invoices/")
+      !c.req.path.startsWith("/api/billing/")
     ) {
       const subscription = await pool.query(
-        "SELECT platform_status,grace_ends_at FROM school_profiles WHERE user_id=$1",
+        "SELECT platform_status,subscription_expires_at FROM school_profiles WHERE user_id=$1",
         [context.schoolId],
       );
+      const expiresAt = subscription.rows[0]?.subscription_expires_at;
       if (
         subscription.rows[0]?.platform_status === "suspended" ||
-        (subscription.rows[0]?.grace_ends_at &&
-          new Date(subscription.rows[0].grace_ends_at) < new Date())
+        (expiresAt && new Date(expiresAt) < new Date())
       ) {
-        await pool.query(
-          "UPDATE school_profiles SET platform_status='suspended' WHERE user_id=$1",
-          [context.schoolId],
-        );
         c.status(402);
         c.header("content-type", "application/json");
         return null;
@@ -337,7 +388,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
           [school.user_id, plan, cycle, count, amount, school.subscription_expires_at],
         );
         await pool.query(
-          "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,subscription_expires_at=COALESCE(subscription_expires_at,now()+interval '7 days'),grace_ends_at=COALESCE(grace_ends_at,now()+interval '14 days') WHERE user_id=$1",
+          "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,subscription_expires_at=COALESCE(subscription_expires_at,now()+interval '30 days') WHERE user_id=$1",
           [school.user_id, plan, cycle],
         );
         created++;
@@ -352,7 +403,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
               from: process.env.RESEND_FROM_EMAIL,
               to: [school.contact_email],
               subject: `Shule Yetu subscription invoice ${invoice.rows[0].invoice_number}`,
-              text: `Hello ${school.school_name}, your ${plan} ${cycle} subscription invoice is ready. Amount: KSh ${amount.toLocaleString()}. Due: ${new Date(invoice.rows[0].due_at).toLocaleDateString()}. Please pay and record the receipt in the Billing page. A seven-day grace period follows the due date.`,
+              text: `Hello ${school.school_name}, your ${plan} ${cycle} subscription invoice is ready. Amount: KSh ${amount.toLocaleString()}. Due: ${new Date(invoice.rows[0].due_at).toLocaleDateString()}. Sign in to the Billing page and pay by M-Pesa STK Push. School access pauses when the subscription expires.`,
             }),
           }).catch(() => undefined);
         }
@@ -375,7 +426,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
               from: process.env.RESEND_FROM_EMAIL,
               to: [school.contact_email],
               subject: `Payment reminder: Shule Yetu invoice ${invoice.invoice_number}`,
-              text: `Hello ${school.school_name}, invoice ${invoice.invoice_number} for KSh ${Number(invoice.amount).toLocaleString()} is due ${new Date(invoice.due_at).toLocaleDateString()}. School access may be suspended after the seven-day grace period. Record the payment receipt on the Billing page.`,
+              text: `Hello ${school.school_name}, invoice ${invoice.invoice_number} for KSh ${Number(invoice.amount).toLocaleString()} is due ${new Date(invoice.due_at).toLocaleDateString()}. Pay by M-Pesa STK Push in the Billing page to keep school access active.`,
             }),
           });
           if (response.ok) {
@@ -552,8 +603,8 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       typeof body[key] === "string" ? (body[key] as string).trim() : "",
     );
     const result = await pool.query(
-      `INSERT INTO school_profiles (user_id, school_name, school_type, contact_email, phone, address, website, motto)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(user_id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXCLUDED.school_type, contact_email=EXCLUDED.contact_email, phone=EXCLUDED.phone, address=EXCLUDED.address, website=EXCLUDED.website, motto=EXCLUDED.motto, updated_at=now()
+      `INSERT INTO school_profiles (user_id, school_name, school_type, contact_email, phone, address, website, motto, trial_started_at, subscription_expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),now()+interval '30 days') ON CONFLICT(user_id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXCLUDED.school_type, contact_email=EXCLUDED.contact_email, phone=EXCLUDED.phone, address=EXCLUDED.address, website=EXCLUDED.website, motto=EXCLUDED.motto, updated_at=now()
        RETURNING school_name, school_type, contact_email, phone, address, website, motto`,
       [userId, body.schoolName.trim(), ...values],
     );
@@ -1960,8 +2011,8 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [c.req.param("id"), x.schoolId],
     );
     const rows = await pool.query(
-      `SELECT e.id,e.name AS exam,e.term,e.academic_year AS "academicYear",m.subject,m.score FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' ORDER BY e.academic_year,e.created_at,m.subject`,
-      [c.req.param("id"), x.schoolId],
+      `SELECT e.id,e.name AS exam,e.term,e.academic_year AS "academicYear",m.subject,m.score FROM school_marks m JOIN school_exams e ON e.id=m.exam_id AND e.school_owner_id=m.school_owner_id WHERE m.student_id=$1 AND m.school_owner_id=$2 AND m.status='Approved' AND ($3='' OR e.term=$3) AND ($4='' OR e.academic_year::text=$4) ORDER BY e.academic_year,e.created_at,m.subject`,
+      [c.req.param("id"), x.schoolId, c.req.query("term") || "", c.req.query("year") || ""],
     );
     type StudentExam = {
       id: string;
@@ -2082,14 +2133,26 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const context = await guard(c, "manage_settings");
     if (!context) return c.json({ error: "Not allowed to manage billing." }, 403);
     const result = await pool.query(
-      `SELECT p.billing_plan AS plan,p.billing_cycle AS cycle,p.platform_status AS status,p.subscription_expires_at AS "expiresAt",p.grace_ends_at AS "graceEndsAt",
+      `SELECT p.billing_plan AS plan,p.billing_cycle AS cycle,p.platform_status AS status,p.trial_started_at AS "trialStartedAt",p.subscription_expires_at AS "expiresAt",p.grace_ends_at AS "graceEndsAt",
         (SELECT count(*)::int FROM school_students s WHERE s.school_owner_id=p.user_id AND s.status='Active') AS "studentCount",
+        EXISTS(SELECT 1 FROM school_billing_payments b WHERE b.school_owner_id=p.user_id AND b.status='confirmed') AS "hasPaidSubscription",
         COALESCE((SELECT json_agg(json_build_object('id',i.id,'number',i.invoice_number,'plan',i.plan,'cycle',i.cycle,'studentCount',i.student_count,'amount',i.amount,'status',i.status,'issuedAt',i.issued_at,'dueAt',i.due_at) ORDER BY i.issued_at DESC) FROM school_billing_invoices i WHERE i.school_owner_id=p.user_id),'[]'::json) AS invoices,
-        COALESCE((SELECT json_agg(json_build_object('id',b.id,'amount',b.amount,'method',b.method,'reference',b.reference,'paidAt',b.paid_at,'status',b.status) ORDER BY b.paid_at DESC) FROM school_billing_payments b WHERE b.school_owner_id=p.user_id),'[]'::json) AS payments
+        COALESCE((SELECT json_agg(json_build_object('id',b.id,'amount',b.amount,'method',b.method,'reference',COALESCE(NULLIF(b.mpesa_receipt,''),b.reference),'paidAt',b.paid_at,'status',b.status) ORDER BY b.paid_at DESC) FROM school_billing_payments b WHERE b.school_owner_id=p.user_id),'[]'::json) AS payments
        FROM school_profiles p WHERE p.user_id=$1`,
       [context.schoolId],
     );
     return c.json({ ...result.rows[0], planPrices });
+  });
+  app.get("/api/billing/status", async (c) => {
+    const context = await contextFor(c);
+    if (!context) return c.json({ error: "Sign in to continue." }, 403);
+    const result = await pool.query(
+      "SELECT platform_status AS status,subscription_expires_at AS \"expiresAt\" FROM school_profiles WHERE user_id=$1",
+      [context.schoolId],
+    );
+    const row = result.rows[0];
+    const expired = row?.status === "suspended" || (row?.expiresAt && new Date(row.expiresAt) < new Date());
+    return c.json({ locked: Boolean(expired), expiresAt: row?.expiresAt || null });
   });
   app.post("/api/billing/invoices", async (c) => {
     const context = await guard(c, "manage_settings");
@@ -2128,7 +2191,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [context.schoolId, resolvedPlan, cycle, students, amount],
     );
     await pool.query(
-      "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,platform_status='active',subscription_expires_at=COALESCE(subscription_expires_at,now()+interval '7 days'),grace_ends_at=COALESCE(grace_ends_at,COALESCE(subscription_expires_at,now()+interval '7 days')+interval '7 days') WHERE user_id=$1",
+      "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3 WHERE user_id=$1",
       [context.schoolId, resolvedPlan, cycle],
     );
     return c.json(invoice.rows[0], 201);
@@ -2154,7 +2217,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       }
       const row = invoice.rows[0];
       await client.query(
-        "INSERT INTO school_billing_payments(school_owner_id,invoice_id,amount,method,reference) VALUES($1,$2,$3,$4,$5)",
+        "INSERT INTO school_billing_payments(school_owner_id,invoice_id,amount,method,reference,paid_at) VALUES($1,$2,$3,$4,$5,NULL)",
         [context.schoolId, row.id, row.amount, method, reference],
       );
       await client.query("COMMIT");
@@ -2164,6 +2227,42 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       return c.json({ error: "Could not save payment." }, 400);
     } finally {
       client.release();
+    }
+  });
+  app.post("/api/billing/invoices/:id/stk-push", async (c) => {
+    const context = await guard(c, "manage_settings");
+    if (!context || context.role !== "Admin")
+      return c.json({ error: "Only a school administrator can pay the subscription." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const rawPhone = String(body?.phone || "").replace(/[\s()-]/g, "");
+    const phone = rawPhone.startsWith("0") ? `254${rawPhone.slice(1)}` : rawPhone.replace(/^\+/, "");
+    if (!/^254[17]\d{8}$/.test(phone))
+      return c.json({ error: "Enter a valid Kenyan M-Pesa number." }, 400);
+    const invoice = await pool.query(
+      "SELECT id,invoice_number,amount,cycle FROM school_billing_invoices WHERE id=$1 AND school_owner_id=$2 AND status='due'",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (!invoice.rowCount) return c.json({ error: "Due invoice not found." }, 404);
+    const row = invoice.rows[0];
+    const pending = await pool.query(
+      "SELECT 1 FROM school_billing_payments WHERE invoice_id=$1 AND status='pending' LIMIT 1",
+      [row.id],
+    );
+    if (pending.rowCount) return c.json({ error: "An STK payment is already pending for this invoice." }, 409);
+    const payment = await pool.query(
+      "INSERT INTO school_billing_payments(school_owner_id,invoice_id,amount,method,reference,paid_at) VALUES($1,$2,$3,'M-Pesa STK',$4,NULL) RETURNING id",
+      [context.schoolId, row.id, row.amount, `starting:${randomUUID()}`],
+    );
+    try {
+      const stk = await startDarajaStkPush(phone, Number(row.amount), row.invoice_number, "School subscription");
+      await pool.query(
+        "UPDATE school_billing_payments SET reference=$2 WHERE id=$1",
+        [payment.rows[0].id, stk.checkoutRequestId],
+      );
+      return c.json({ message: stk.message, amount: Number(row.amount) }, 202);
+    } catch (error) {
+      await pool.query("UPDATE school_billing_payments SET status='rejected' WHERE id=$1", [payment.rows[0].id]);
+      return c.json({ error: error instanceof Error ? error.message : "Could not start M-Pesa payment." }, 502);
     }
   });
   app.get("/api/sms", async (c) => {
@@ -2375,6 +2474,34 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
             ],
           );
         }
+      } else if (!transaction.rowCount) {
+        const payment = await client.query(
+          "SELECT b.id,b.school_owner_id,b.invoice_id,b.amount,b.status,i.cycle FROM school_billing_payments b JOIN school_billing_invoices i ON i.id=b.invoice_id WHERE b.reference=$1 AND b.method='M-Pesa STK' FOR UPDATE OF b,i",
+          [checkoutId],
+        );
+        if (payment.rowCount && payment.rows[0].status === "pending") {
+          const row = payment.rows[0];
+          if (resultCode === 0 && Number(values.Amount) === Number(row.amount) && receipt) {
+            const duration = row.cycle === "annual" ? "12 months" : row.cycle === "termly" ? "3 months" : "1 month";
+            await client.query(
+              "UPDATE school_billing_payments SET status='confirmed',mpesa_receipt=$2,paid_at=now() WHERE id=$1",
+              [row.id, receipt],
+            );
+            await client.query(
+              "UPDATE school_billing_invoices SET status='paid',paid_at=now() WHERE id=$1",
+              [row.invoice_id],
+            );
+            await client.query(
+              "UPDATE school_profiles SET platform_status='active',subscription_expires_at=GREATEST(COALESCE(subscription_expires_at,now()),now())+$2::interval,grace_ends_at=NULL WHERE user_id=$1",
+              [row.school_owner_id, duration],
+            );
+          } else {
+            await client.query(
+              "UPDATE school_billing_payments SET status='rejected',mpesa_receipt=$2 WHERE id=$1",
+              [row.id, receipt],
+            );
+          }
+        }
       }
       await client.query("COMMIT");
       return c.json({ ResultCode: 0, ResultDesc: "Accepted" });
@@ -2404,7 +2531,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         403,
       );
     const schools = await pool.query(
-      `SELECT p.user_id AS id,p.school_name AS name,p.contact_email AS email,p.phone,p.platform_status AS status,p.billing_plan AS plan,p.billing_cycle AS cycle,
+      `SELECT p.user_id AS id,p.school_name AS name,p.contact_email AS email,p.phone,p.platform_status AS status,p.billing_plan AS plan,p.billing_cycle AS cycle,p.subscription_expires_at AS "subscriptionExpiresAt",
         (SELECT count(*)::int FROM school_students s WHERE s.school_owner_id=p.user_id AND s.status='Active') AS "activeStudents",
         (SELECT count(*)::int FROM school_staff a WHERE a.school_owner_id=p.user_id AND a.active) AS "activeStaff"
        FROM school_profiles p ORDER BY p.school_name`,
@@ -2419,15 +2546,17 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       );
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     const status = String(body?.status || ""),
-      plan = String(body?.plan || "");
-    if (!["active", "suspended"].includes(status) && !(plan in planPrices))
+      plan = String(body?.plan || ""),
+      extendDays = Number(body?.extendDays || 0);
+    if (!["active", "suspended"].includes(status) && !(plan in planPrices) && !(Number.isInteger(extendDays) && extendDays >= 1 && extendDays <= 3650))
       return c.json({ error: "Choose a valid school status or plan." }, 400);
     const result = await pool.query(
-      "UPDATE school_profiles SET platform_status=COALESCE(NULLIF($2,''),platform_status),billing_plan=COALESCE(NULLIF($3,''),billing_plan) WHERE user_id=$1 RETURNING user_id",
+      "UPDATE school_profiles SET platform_status=CASE WHEN $4::int>0 THEN 'active' ELSE COALESCE(NULLIF($2,''),platform_status) END,billing_plan=COALESCE(NULLIF($3,''),billing_plan),subscription_expires_at=CASE WHEN $4::int>0 THEN GREATEST(COALESCE(subscription_expires_at,now()),now())+($4::text||' days')::interval ELSE subscription_expires_at END WHERE user_id=$1 RETURNING user_id",
       [
         c.req.param("id"),
         ["active", "suspended"].includes(status) ? status : "",
         plan in planPrices ? plan : "",
+        Number.isInteger(extendDays) && extendDays >= 1 && extendDays <= 3650 ? extendDays : 0,
       ],
     );
     if (!result.rowCount) return c.json({ error: "School not found." }, 404);
@@ -2478,7 +2607,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
           [row.invoice_id],
         );
         await client.query(
-          "UPDATE school_profiles SET platform_status='active',subscription_expires_at=now()+$2::interval,grace_ends_at=now()+$2::interval+interval '7 days' WHERE user_id=$1",
+          "UPDATE school_profiles SET platform_status='active',subscription_expires_at=GREATEST(COALESCE(subscription_expires_at,now()),now())+$2::interval,grace_ends_at=NULL WHERE user_id=$1",
           [row.school_owner_id, duration],
         );
       }

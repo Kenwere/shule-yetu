@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -45,6 +45,8 @@ export function PortalShell({
   } | null>(null);
   const [checked, setChecked] = useState(false);
   const [pendingMarks, setPendingMarks] = useState(0);
+  const [billingLocked, setBillingLocked] = useState(false);
+  const pathname = useRouterState({ select: (router) => router.location.pathname });
 
   useEffect(() => {
     void authClient
@@ -56,10 +58,35 @@ export function PortalShell({
         }
         const response = await neonApi("/api/me");
         setUser(await response.json());
+        const billingResponse = await neonApi("/api/billing/status");
+        if (billingResponse.ok) {
+          const billing = (await billingResponse.json()) as { locked?: boolean };
+          setBillingLocked(Boolean(billing.locked));
+        }
       })
       .catch(() => setUser(null))
       .finally(() => setChecked(true));
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const refreshSubscription = async () => {
+      try {
+        const response = await neonApi("/api/billing/status");
+        if (!response.ok) return;
+        const billing = (await response.json()) as { locked?: boolean };
+        if (active) setBillingLocked(Boolean(billing.locked));
+      } catch {
+        // Keep the current route state if the status check is temporarily unavailable.
+      }
+    };
+    const interval = window.setInterval(() => void refreshSubscription(), 20_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (user?.role !== "Admin") {
@@ -86,6 +113,21 @@ export function PortalShell({
 
   if (!checked) return null;
   if (!user) return <SignInRequired />;
+  if (billingLocked && pathname !== "/billing")
+    return (
+      <div className="grid min-h-screen place-items-center bg-paper px-5 text-ink">
+        <section className="max-w-lg border border-ink/15 bg-white p-8 text-center shadow-sm">
+          <p className="eyebrow text-ink-soft">Subscription required</p>
+          <h1 className="mt-2 font-display text-3xl uppercase">School access is paused</h1>
+          <p className="mt-3 text-sm text-ink-soft">
+            The free trial or paid subscription has ended. Open Billing to choose a plan and pay by M-Pesa STK Push. Access resumes after payment is confirmed.
+          </p>
+          <Link to="/billing" className="mt-6 inline-flex bg-ink px-5 py-3 text-sm font-bold uppercase text-paper">
+            Open billing
+          </Link>
+        </section>
+      </div>
+    );
 
   return (
     <SidebarProvider>

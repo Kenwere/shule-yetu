@@ -1,4 +1,4 @@
-import { getAuthToken } from "./auth-client";
+import { authClient, getAuthToken } from "./auth-client";
 import { toast } from "sonner";
 
 const apiBase = import.meta.env.VITE_NEON_FUNCTION_HELLO_URL;

@@ -1,6 +1,7 @@
 ﻿import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PortalShell } from "@/components/PortalShell";
+import { StudentReportCard } from "@/components/StudentReportCard";
 import { Panel, btn, inputCls, tdCls, thCls } from "@/components/portal-ui";
 import { neonApi } from "@/lib/neon-api";
 type ClassRow = { name: string; streams: string[]; subjects: string[] };
@@ -26,6 +27,7 @@ type Mark = {
 };
 type Report = {
   schoolName: string;
+  logoUrl: string;
   name: string;
   className: string;
   stream: string;
@@ -62,6 +64,11 @@ function ExamsPage() {
   const [message, setMessage] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [printCards, setPrintCards] = useState(false);
+  const [reportCards, setReportCards] = useState<{
+    student: any;
+    attendance: { present: number; absent: number; late: number };
+    marks: any[];
+  }[]>([]);
   const [marksLoading, setMarksLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -241,10 +248,26 @@ function ExamsPage() {
       setError(e instanceof Error ? e.message : "Could not delete exam.");
     }
   }
-  function printExamCards() {
-    setPrintCards(true);
-    window.addEventListener("afterprint", () => setPrintCards(false), { once: true });
-    window.setTimeout(() => window.print(), 50);
+  async function printExamCards() {
+    if (!report) return;
+    setBusy(true);
+    setError("");
+    try {
+      const cards = await Promise.all(report.students.map(async (student) => {
+        const response = await neonApi(`/api/students/${student.id}/report-card?term=${encodeURIComponent(report.term)}&year=${encodeURIComponent(report.academicYear)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `Could not load ${student.name}'s report card.`);
+        return data;
+      }));
+      setReportCards(cards);
+      setPrintCards(true);
+      window.addEventListener("afterprint", () => setPrintCards(false), { once: true });
+      window.setTimeout(() => window.print(), 100);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not prepare report cards.");
+    } finally {
+      setBusy(false);
+    }
   }
   const selected = exams.find((x) => x.id === examId);
   const visibleExams = exams.filter((exam) => {
@@ -559,6 +582,19 @@ function ExamsPage() {
       {report && (
         <section ref={reportPanelRef} tabIndex={-1} aria-label={`${report.name} report`}>
           <Panel title={`${report.schoolName} - ${report.name} ranked report`} className="mt-6">
+            <header className="mb-4 flex items-center gap-4 border-b-2 border-ink/30 pb-4">
+              {report.logoUrl && <img src={report.logoUrl} alt="School logo" className="h-16 w-16 object-contain" />}
+              <div className="min-w-0 flex-1">
+                <h2 className="font-display text-xl uppercase">{report.schoolName}</h2>
+                <p className="mt-1 text-sm font-semibold">{report.name}</p>
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                  <span><b>Class:</b> {report.className}</span>
+                  <span><b>Stream:</b> {report.stream === "*" ? "All streams" : report.stream}</span>
+                  <span><b>Year:</b> {report.academicYear}</span>
+                  <span><b>Term:</b> {report.term}</span>
+                </div>
+              </div>
+            </header>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
               <p className="text-sm">
                 {report.className} {report.stream} - {report.term} {report.academicYear}
@@ -573,42 +609,19 @@ function ExamsPage() {
               </div>
             </div>
             <div className={`${printCards ? "block print:block" : "hidden print:hidden"} mb-4`}>
-              {report.students.map((s) => (
-                <article
-                  key={s.id}
-                  className="mb-8 border border-ink/20 p-6 print:break-after-page"
-                >
-                  <h2 className="font-display text-2xl">{report.schoolName}</h2>
-                  <h3 className="mt-2 font-semibold">{report.name} report card</h3>
-                  <p>
-                    {s.name} · {s.adm} · {report.className} {s.stream}
-                  </p>
-                  <p>
-                    {report.term} {report.academicYear} · Position {s.position}
-                  </p>
-                  <table className="mt-4 w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th className={thCls}>Subject</th>
-                        <th className={thCls}>Score</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.subjects.map((subject) => (
-                        <tr key={subject}>
-                          <td className={tdCls}>{subject}</td>
-                          <td className={tdCls}>{s.marks[subject] ?? "-"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <th className={tdCls}>Total</th>
-                        <th className={tdCls}>{Number(s.total).toFixed(1)}</th>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </article>
+              {reportCards.map((card) => (
+                <div key={card.student.id} className="mb-8 print:break-after-page">
+                  <StudentReportCard
+                    student={card.student}
+                    schoolName={report.schoolName}
+                    logoUrl={report.logoUrl}
+                    detail={card.student}
+                    marks={card.marks}
+                    attendance={card.attendance}
+                    remarks={{}}
+                    onRemark={() => undefined}
+                  />
+                </div>
               ))}
             </div>
             <div className={`${printCards ? "hidden print:hidden" : "hidden print:block"} mb-4`}>

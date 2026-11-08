@@ -19,7 +19,7 @@ type Payment = {
   amount: number;
   method: string;
   reference: string;
-  paidAt: string;
+  paidAt: string | null;
   status: string;
 };
 type BillingData = {
@@ -28,6 +28,8 @@ type BillingData = {
   status: string;
   studentCount: number;
   expiresAt?: string;
+  trialStartedAt?: string;
+  hasPaidSubscription: boolean;
   invoices: Invoice[];
   payments: Payment[];
 };
@@ -48,7 +50,7 @@ export const Route = createFileRoute("/billing")({
 function BillingPage() {
   const [data, setData] = useState<BillingData | null>(null);
   const [cycle, setCycle] = useState("monthly");
-  const [reference, setReference] = useState("");
+  const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -60,6 +62,10 @@ function BillingPage() {
   }
   useEffect(() => {
     void load().catch((e) => setError(e instanceof Error ? e.message : "Could not load billing."));
+    const interval = window.setInterval(() => {
+      void load().catch((e) => setError(e instanceof Error ? e.message : "Could not refresh billing."));
+    }, 15_000);
+    return () => window.clearInterval(interval);
   }, []);
   async function createInvoice() {
     setBusy(true);
@@ -73,10 +79,7 @@ function BillingPage() {
       });
       const invoice = await response.json();
       if (!response.ok) throw new Error(invoice.error || "Could not create invoice.");
-      setReference("");
-      setMessage(
-        `Invoice ${invoice.number} created. Record its M-Pesa or bank reference after payment.`,
-      );
+      setMessage(`Invoice ${invoice.number} created. Enter the administrator's M-Pesa number below to pay by STK Push.`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create invoice.");
@@ -84,28 +87,25 @@ function BillingPage() {
       setBusy(false);
     }
   }
-  async function recordPayment(invoice: Invoice) {
-    if (!reference.trim()) {
-      setError("Enter the payment reference first.");
+  async function payInvoice(invoice: Invoice) {
+    if (!phone.trim()) {
+      setError("Enter the administrator's M-Pesa number first.");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const response = await neonApi(`/api/billing/invoices/${invoice.id}/pay`, {
+      const response = await neonApi(`/api/billing/invoices/${invoice.id}/stk-push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method: "M-Pesa", reference }),
+        body: JSON.stringify({ phone }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Could not record payment.");
-      setMessage(
-        `Payment reference submitted for invoice ${invoice.number}. Access will renew after platform verification.`,
-      );
-      setReference("");
+      if (!response.ok) throw new Error(result.error || "Could not start M-Pesa payment.");
+      setMessage(`${result.message || "Approve the M-Pesa prompt on your phone."} Amount: KSh ${Number(result.amount || invoice.amount).toLocaleString()}.`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not record payment.");
+      setError(e instanceof Error ? e.message : "Could not start M-Pesa payment.");
     } finally {
       setBusy(false);
     }
@@ -134,6 +134,17 @@ function BillingPage() {
           </article>
         ))}
       </section>
+      {data?.expiresAt && !data.hasPaidSubscription && (
+        <section className="mb-6 border border-gold/50 bg-gold/10 p-5">
+          <h2 className="font-semibold">30-day free trial</h2>
+          <p className="mt-1 text-sm">
+            Your trial ends {new Date(data.expiresAt).toLocaleDateString()}. After that date, the school portal is locked until the subscription is paid.
+          </p>
+        </section>
+      )}
+      {data?.hasPaidSubscription && data.expiresAt && (
+        <p className="mb-6 text-sm text-ink-soft">Paid through {new Date(data.expiresAt).toLocaleDateString()}.</p>
+      )}
       <section className="mb-6 overflow-x-auto border border-ink/10 bg-paper p-5">
         <h2 className="eyebrow mb-4">Illustrative monthly plans (priced by active students)</h2>
         <table className="w-full text-left text-sm">
@@ -207,19 +218,10 @@ function BillingPage() {
                   </p>
                 </div>
                 {invoice.status === "due" && (
-                  <div className="flex gap-2">
-                    <input
-                      className={inputCls}
-                      placeholder="M-Pesa reference"
-                      value={reference}
-                      onChange={(e) => setReference(e.target.value)}
-                    />
-                    <button
-                      className={btn("good")}
-                      disabled={busy}
-                      onClick={() => void recordPayment(invoice)}
-                    >
-                      Record payment
+                  <div className="flex flex-wrap gap-2">
+                    <input className={inputCls} type="tel" placeholder="Admin M-Pesa number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                    <button className={btn("good")} disabled={busy} onClick={() => void payInvoice(invoice)}>
+                      {busy ? "Sending…" : `Pay KSh ${Number(invoice.amount).toLocaleString()} with STK`}
                     </button>
                   </div>
                 )}
@@ -227,11 +229,7 @@ function BillingPage() {
             ))}
           </div>
         )}
-        <p className="mt-4 text-xs text-ink-soft">
-          M-Pesa STK Push is not connected yet. Record the M-Pesa receipt/reference after paying
-          through your usual channel. Unpaid subscriptions have a 7-day grace period before school
-          access is suspended.
-        </p>
+        {!data?.invoices.length && <p className="mt-4 text-xs text-ink-soft">Create an invoice to see the amount due and request an M-Pesa STK Push. Access renews automatically after Daraja confirms payment.</p>}
       </section>
       <section className="border border-ink/10 bg-paper p-5">
         <h2 className="eyebrow mb-3">Payment history</h2>
@@ -241,7 +239,7 @@ function BillingPage() {
           data.payments.map((p) => (
             <p key={p.id} className="border-t border-ink/10 py-3 text-sm">
               KSh {Number(p.amount).toLocaleString()} · {p.method} · {p.reference} ·{" "}
-              {new Date(p.paidAt).toLocaleDateString()} Â· {p.status}
+              {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "Awaiting confirmation"} · {p.status}
             </p>
           ))
         )}

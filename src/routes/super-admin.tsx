@@ -11,6 +11,7 @@ type School = {
   status: string;
   plan: string;
   cycle: string;
+  subscriptionExpiresAt?: string | null;
   activeStudents: number;
   activeStaff: number;
 };
@@ -53,7 +54,7 @@ function SuperAdminPage() {
   useEffect(() => {
     void load().catch((e) => setError(e instanceof Error ? e.message : "Could not load schools."));
   }, []);
-  async function update(school: School, patch: { status?: string; plan?: string }) {
+  async function update(school: School, patch: { status?: string; plan?: string; extendDays?: number }) {
     setBusy(school.id);
     setError("");
     setMessage("");
@@ -175,8 +176,18 @@ function SuperAdminPage() {
                   >
                     {school.status === "active" ? "Suspend school" : "Restore access"}
                   </button>
+                  <button
+                    className={btn("ghost")}
+                    disabled={busy === school.id}
+                    onClick={() => void update(school, { extendDays: 30 })}
+                  >
+                    Extend 30 days
+                  </button>
                 </div>
               </div>
+              <p className="mt-3 text-xs text-ink-soft">
+                Subscription expires {school.subscriptionExpiresAt ? new Date(school.subscriptionExpiresAt).toLocaleDateString() : "not set"}
+              </p>
             </article>
           ))}
         </div>

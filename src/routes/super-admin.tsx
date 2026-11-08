@@ -1,8 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { PortalShell } from "@/components/PortalShell";
 import { btn, inputCls } from "@/components/portal-ui";
 import { neonApi } from "@/lib/neon-api";
+import { authClient } from "@/lib/auth-client";
 type School = {
   id: string;
   name: string;
@@ -94,124 +94,144 @@ function SuperAdminPage() {
     }
   }
   return (
-    <PortalShell eyebrow="Platform controls" title="Super admin">
-      <p className="mb-5 max-w-3xl text-sm text-ink-soft">
-        Manage school access and plan assignment across Shule Yetu. Add a comma-separated,
-        authorized email allowlist to the Neon Function environment variable{" "}
-        <code>SUPER_ADMIN_EMAILS</code> to grant platform access. This is separate from school
-        administrator roles.
-      </p>
-      {error && (
-        <p role="alert" className="mb-4 text-sm text-owed">
-          {error}
+    <div className="min-h-screen bg-paper text-ink">
+      <header className="flex h-14 items-center justify-between border-b border-ink/10 px-5">
+        <Link to="/" className="font-display text-lg">
+          Shule Yetu · Platform
+        </Link>
+        <div className="flex items-center gap-3">
+          <Link to="/login" className="text-sm underline">
+            School login
+          </Link>
+          <button
+            className={btn("ghost")}
+            onClick={() => void authClient.signOut().then(() => window.location.assign("/login"))}
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="mx-auto max-w-6xl px-4 py-7">
+        <p className="eyebrow text-ink-soft">Platform controls</p>
+        <h1 className="mb-5 font-display text-3xl uppercase">Super admin</h1>
+        <p className="mb-5 max-w-3xl text-sm text-ink-soft">
+          Manage school access and plan assignment across Shule Yetu. Add a comma-separated,
+          authorized email allowlist to the Neon Function environment variable{" "}
+          <code>SUPER_ADMIN_EMAILS</code> to grant platform access. This is separate from school
+          administrator roles.
         </p>
-      )}
-      {message && (
-        <p role="status" className="mb-4 text-sm text-collected">
-          {message}
-        </p>
-      )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <article className="border border-ink/10 bg-paper p-5">
-          <p className="eyebrow text-ink-soft">Schools</p>
-          <p className="mt-2 font-display text-3xl">{schools.length}</p>
-        </article>
-        <article className="border border-ink/10 bg-paper p-5">
-          <p className="eyebrow text-ink-soft">Active students</p>
-          <p className="mt-2 font-display text-3xl">
-            {schools.reduce((sum, school) => sum + Number(school.activeStudents), 0)}
-          </p>
-        </article>
-      </div>
-      <div className="mt-6 space-y-4">
-        {schools.map((school) => (
-          <article key={school.id} className="border border-ink/10 bg-paper p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="font-display text-xl">{school.name}</h2>
-                <p className="text-sm text-ink-soft">
-                  {school.email} · {school.phone || "No phone"}
-                </p>
-                <p className="mt-1 text-xs text-ink-soft">
-                  {school.activeStudents} active students · {school.activeStaff} staff ·{" "}
-                  {school.status}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  aria-label={`${school.name} plan`}
-                  className={inputCls}
-                  value={school.plan}
-                  onChange={(e) => void update(school, { plan: e.target.value })}
-                >
-                  {plans.map((plan) => (
-                    <option key={plan}>{plan}</option>
-                  ))}
-                </select>
-                <button
-                  className={btn(school.status === "active" ? "bad" : "good")}
-                  disabled={busy === school.id}
-                  onClick={() =>
-                    void update(school, {
-                      status: school.status === "active" ? "suspended" : "active",
-                    })
-                  }
-                >
-                  {school.status === "active" ? "Suspend school" : "Restore access"}
-                </button>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
-      <section className="mt-8 border border-ink/10 bg-paper p-5">
-        <h2 className="eyebrow mb-4">Subscription payment verification</h2>
-        <p className="mb-4 text-sm text-ink-soft">
-          Manual M-Pesa or bank references remain pending until platform admin verification.
-          Confirming extends the school's subscription; rejecting leaves the invoice due.
-        </p>
-        {payments.length ? (
-          <div className="space-y-3">
-            {payments.map((payment) => (
-              <article
-                key={payment.id}
-                className="flex flex-wrap items-center justify-between gap-3 border border-ink/10 p-4"
-              >
-                <div>
-                  <strong>{payment.schoolName}</strong>
-                  <p className="text-sm text-ink-soft">
-                    {payment.invoiceNumber} · KSh {Number(payment.amount).toLocaleString()} ·{" "}
-                    {payment.method} reference {payment.reference}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    className={btn("good")}
-                    disabled={busy === payment.id}
-                    onClick={() => void decidePayment(payment, "confirm")}
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    className={btn("bad")}
-                    disabled={busy === payment.id}
-                    onClick={() => void decidePayment(payment, "reject")}
-                  >
-                    Reject
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-ink-soft">
-            No subscription payments are waiting for verification.
+        {error && (
+          <p role="alert" className="mb-4 text-sm text-owed">
+            {error}
           </p>
         )}
-      </section>
-      {!error && !schools.length && (
-        <p className="mt-6 text-sm text-ink-soft">No registered schools yet.</p>
-      )}
-    </PortalShell>
+        {message && (
+          <p role="status" className="mb-4 text-sm text-collected">
+            {message}
+          </p>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <article className="border border-ink/10 bg-paper p-5">
+            <p className="eyebrow text-ink-soft">Schools</p>
+            <p className="mt-2 font-display text-3xl">{schools.length}</p>
+          </article>
+          <article className="border border-ink/10 bg-paper p-5">
+            <p className="eyebrow text-ink-soft">Active students</p>
+            <p className="mt-2 font-display text-3xl">
+              {schools.reduce((sum, school) => sum + Number(school.activeStudents), 0)}
+            </p>
+          </article>
+        </div>
+        <div className="mt-6 space-y-4">
+          {schools.map((school) => (
+            <article key={school.id} className="border border-ink/10 bg-paper p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-xl">{school.name}</h2>
+                  <p className="text-sm text-ink-soft">
+                    {school.email} · {school.phone || "No phone"}
+                  </p>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    {school.activeStudents} active students · {school.activeStaff} staff ·{" "}
+                    {school.status}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    aria-label={`${school.name} plan`}
+                    className={inputCls}
+                    value={school.plan}
+                    onChange={(e) => void update(school, { plan: e.target.value })}
+                  >
+                    {plans.map((plan) => (
+                      <option key={plan}>{plan}</option>
+                    ))}
+                  </select>
+                  <button
+                    className={btn(school.status === "active" ? "bad" : "good")}
+                    disabled={busy === school.id}
+                    onClick={() =>
+                      void update(school, {
+                        status: school.status === "active" ? "suspended" : "active",
+                      })
+                    }
+                  >
+                    {school.status === "active" ? "Suspend school" : "Restore access"}
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+        <section className="mt-8 border border-ink/10 bg-paper p-5">
+          <h2 className="eyebrow mb-4">Subscription payment verification</h2>
+          <p className="mb-4 text-sm text-ink-soft">
+            Manual M-Pesa or bank references remain pending until platform admin verification.
+            Confirming extends the school's subscription; rejecting leaves the invoice due.
+          </p>
+          {payments.length ? (
+            <div className="space-y-3">
+              {payments.map((payment) => (
+                <article
+                  key={payment.id}
+                  className="flex flex-wrap items-center justify-between gap-3 border border-ink/10 p-4"
+                >
+                  <div>
+                    <strong>{payment.schoolName}</strong>
+                    <p className="text-sm text-ink-soft">
+                      {payment.invoiceNumber} · KSh {Number(payment.amount).toLocaleString()} ·{" "}
+                      {payment.method} reference {payment.reference}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className={btn("good")}
+                      disabled={busy === payment.id}
+                      onClick={() => void decidePayment(payment, "confirm")}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      className={btn("bad")}
+                      disabled={busy === payment.id}
+                      onClick={() => void decidePayment(payment, "reject")}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-ink-soft">
+              No subscription payments are waiting for verification.
+            </p>
+          )}
+        </section>
+        {!error && !schools.length && (
+          <p className="mt-6 text-sm text-ink-soft">No registered schools yet.</p>
+        )}
+      </main>
+    </div>
   );
 }

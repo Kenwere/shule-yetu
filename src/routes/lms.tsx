@@ -314,6 +314,44 @@ function LearningPage() {
     }
   }
 
+  async function editQuestion(question: Question) {
+    const prompt = window.prompt("Update question text", question.prompt);
+    if (prompt === null) return;
+    const marks = window.prompt("Update mark value", String(question.marks));
+    if (marks === null) return;
+    try {
+      const response = await neonApi(`/api/lms/questions/${question.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, marks: Number(marks) }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not update this question.");
+      setFlash("Question updated.");
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this question.");
+    }
+  }
+
+  async function editTopic(topic: Topic) {
+    const title = window.prompt("Update topic name", topic.title);
+    if (title === null) return;
+    try {
+      const response = await neonApi(`/api/lms/topics/${topic.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not update this topic.");
+      setFlash("Topic updated.");
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update this topic.");
+    }
+  }
+
   async function createTopic(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -827,6 +865,29 @@ function LearningPage() {
                 Create topic
               </button>
             </form>
+            {classTopics.length > 0 && (
+              <div className="mt-5 space-y-2 border-t border-ink/10 pt-4">
+                <p className="eyebrow text-ink-soft">Manage topics for this class and subject</p>
+                {classTopics.map((topic) => (
+                  <div key={topic.id} className="flex items-center justify-between gap-2 text-sm">
+                    <span>{topic.title}</span>
+                    {canManageLms && (
+                      <div className="flex gap-2">
+                        <button className={btn("ghost")} onClick={() => void editTopic(topic)}>
+                          Edit
+                        </button>
+                        <button
+                          className={btn("bad")}
+                          onClick={() => void removeLms(`/api/lms/topics/${topic.id}`, "Topic")}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </Panel>
           <Panel title="Create learning material">
             <form className="space-y-3" onSubmit={(event) => void createMaterial(event)}>
@@ -1301,6 +1362,21 @@ function LearningPage() {
                   {question.marks} mark(s)
                 </p>
                 <p className="mt-2 text-sm">{question.prompt}</p>
+                {canManageLms && (
+                  <div className="mt-3 flex gap-2">
+                    <button className={btn("ghost")} onClick={() => void editQuestion(question)}>
+                      Edit
+                    </button>
+                    <button
+                      className={btn("bad")}
+                      onClick={() =>
+                        void removeLms(`/api/lms/questions/${question.id}`, "Question")
+                      }
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </article>
             ))}
             {!questions.length && (

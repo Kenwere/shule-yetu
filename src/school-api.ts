@@ -2041,7 +2041,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       [context.schoolId, resolvedPlan, cycle, students, amount],
     );
     await pool.query(
-      "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,platform_status='active' WHERE user_id=$1",
+      "UPDATE school_profiles SET billing_plan=$2,billing_cycle=$3,platform_status='active',subscription_expires_at=COALESCE(subscription_expires_at,now()+interval '7 days'),grace_ends_at=COALESCE(grace_ends_at,COALESCE(subscription_expires_at,now()+interval '7 days')+interval '7 days') WHERE user_id=$1",
       [context.schoolId, resolvedPlan, cycle],
     );
     return c.json(invoice.rows[0], 201);
@@ -2357,6 +2357,40 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       x.schoolId,
     ]);
     return c.json({ ok: true });
+  });
+  app.patch("/api/lms/topics/:id", async (c) => {
+    const x = await guard(c, "manage_lms");
+    if (!x) return c.json({ error: "Not allowed to update topics." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const title = String(body?.title || "").trim();
+    if (!title || title.length > 180)
+      return c.json({ error: "Enter a topic name up to 180 characters." }, 400);
+    const topic = await pool.query(
+      "SELECT class_id,subject FROM school_lms_topics WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), x.schoolId],
+    );
+    if (
+      !topic.rowCount ||
+      !(await canManageLearning(
+        x,
+        c.get("userId"),
+        topic.rows[0].class_id,
+        topic.rows[0].subject,
+        "*",
+      ))
+    )
+      return c.json({ error: "Topic not found or you are not assigned to it." }, 404);
+    const duplicate = await pool.query(
+      "SELECT 1 FROM school_lms_topics WHERE school_owner_id=$1 AND class_id=$2 AND subject=$3 AND lower(title)=lower($4) AND id<>$5 LIMIT 1",
+      [x.schoolId, topic.rows[0].class_id, topic.rows[0].subject, title, c.req.param("id")],
+    );
+    if (duplicate.rowCount)
+      return c.json({ error: "A topic with that name already exists for this subject." }, 409);
+    const saved = await pool.query(
+      "UPDATE school_lms_topics SET title=$3 WHERE id=$1 AND school_owner_id=$2 RETURNING id,title",
+      [c.req.param("id"), x.schoolId, title],
+    );
+    return c.json(saved.rows[0]);
   });
   app.patch("/api/lms/materials/:id", async (c) => {
     const x = await guard(c, "manage_lms");
@@ -2923,6 +2957,80 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       ],
     );
     return c.json(created.rows[0], 201);
+  });
+
+  app.patch("/api/lms/questions/:id", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to manage the question bank." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const prompt = String(body?.prompt || "").trim();
+    const marks = Number(body?.marks);
+    if (!prompt || prompt.length > 10000 || !Number.isFinite(marks) || marks <= 0)
+      return c.json({ error: "Enter question text and a positive mark value." }, 400);
+    const question = await pool.query(
+      "SELECT class_id,subject FROM school_lms_question_bank WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (!question.rowCount) return c.json({ error: "Question not found." }, 404);
+    if (
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        question.rows[0].class_id,
+        question.rows[0].subject,
+        "*",
+      ))
+    )
+      return c.json({ error: "You are not assigned to this class and subject." }, 403);
+    const attempted = await pool.query(
+      `SELECT 1 FROM school_lms_assessment_questions aq JOIN school_lms_attempts a ON a.assessment_id=aq.assessment_id
+       WHERE aq.question_id=$1 LIMIT 1`,
+      [c.req.param("id")],
+    );
+    if (attempted.rowCount)
+      return c.json(
+        { error: "This question has student attempts and can no longer be edited." },
+        409,
+      );
+    const saved = await pool.query(
+      "UPDATE school_lms_question_bank SET prompt=$3,marks=$4,updated_at=now() WHERE id=$1 AND school_owner_id=$2 RETURNING id,prompt,marks",
+      [c.req.param("id"), context.schoolId, prompt, marks],
+    );
+    return c.json(saved.rows[0]);
+  });
+
+  app.delete("/api/lms/questions/:id", async (c) => {
+    const context = await guard(c, "manage_lms");
+    if (!context) return c.json({ error: "Not allowed to manage the question bank." }, 403);
+    const question = await pool.query(
+      "SELECT class_id,subject FROM school_lms_question_bank WHERE id=$1 AND school_owner_id=$2",
+      [c.req.param("id"), context.schoolId],
+    );
+    if (!question.rowCount) return c.json({ error: "Question not found." }, 404);
+    if (
+      !(await canManageLearning(
+        context,
+        c.get("userId"),
+        question.rows[0].class_id,
+        question.rows[0].subject,
+        "*",
+      ))
+    )
+      return c.json({ error: "You are not assigned to this class and subject." }, 403);
+    const referenced = await pool.query(
+      "SELECT 1 FROM school_lms_assessment_questions WHERE question_id=$1 LIMIT 1",
+      [c.req.param("id")],
+    );
+    if (referenced.rowCount)
+      return c.json(
+        { error: "Remove this question from its assessments before deleting it." },
+        409,
+      );
+    await pool.query("DELETE FROM school_lms_question_bank WHERE id=$1 AND school_owner_id=$2", [
+      c.req.param("id"),
+      context.schoolId,
+    ]);
+    return c.json({ ok: true });
   });
 
   app.get("/api/lms/assessments", async (c) => {

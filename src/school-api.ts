@@ -2130,8 +2130,8 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     Enterprise: 0,
   };
   app.get("/api/billing", async (c) => {
-    const context = await guard(c, "manage_settings");
-    if (!context) return c.json({ error: "Not allowed to manage billing." }, 403);
+    const context = await contextFor(c);
+    if (!context) return c.json({ error: "Sign in to view school billing." }, 403);
     const result = await pool.query(
       `SELECT p.billing_plan AS plan,p.billing_cycle AS cycle,p.platform_status AS status,p.trial_started_at AS "trialStartedAt",p.subscription_expires_at AS "expiresAt",p.grace_ends_at AS "graceEndsAt",
         (SELECT count(*)::int FROM school_students s WHERE s.school_owner_id=p.user_id AND s.status='Active') AS "studentCount",
@@ -2141,7 +2141,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
        FROM school_profiles p WHERE p.user_id=$1`,
       [context.schoolId],
     );
-    return c.json({ ...result.rows[0], planPrices });
+    return c.json({ ...result.rows[0], planPrices, canPay: context.role === "Admin" });
   });
   app.get("/api/billing/status", async (c) => {
     const context = await contextFor(c);

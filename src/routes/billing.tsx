@@ -30,6 +30,7 @@ type BillingData = {
   expiresAt?: string;
   trialStartedAt?: string;
   hasPaidSubscription: boolean;
+  canPay: boolean;
   invoices: Invoice[];
   payments: Payment[];
 };
@@ -176,7 +177,7 @@ function BillingPage() {
       </section>
       <section className="mb-6 border border-ink/10 bg-paper p-5">
         <h2 className="eyebrow">Choose a billing cycle</h2>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
+        {data?.canPay ? <div className="mt-3 flex flex-wrap items-center gap-3">
           <select className={inputCls} value={cycle} onChange={(e) => setCycle(e.target.value)}>
             <option value="monthly">Monthly · every 30 days</option>
             <option value="termly">Termly · every 3 months</option>
@@ -189,7 +190,7 @@ function BillingPage() {
           >
             {busy ? "Please wait…" : "Generate invoice"}
           </button>
-        </div>
+        </div> : <p className="mt-3 text-sm text-ink-soft">Only a school administrator can create invoices or pay the subscription. Please contact your administrator.</p>}
         {Number(data?.studentCount || 0) > 1000 && (
           <p className="mt-2 text-sm text-ink-soft">
             Your school is in the Enterprise tier. Contact us for a custom invoice.
@@ -217,7 +218,7 @@ function BillingPage() {
                     Due {new Date(invoice.dueAt).toLocaleDateString()}
                   </p>
                 </div>
-                {invoice.status === "due" && (
+                {invoice.status === "due" && data.canPay && (
                   <div className="flex flex-wrap gap-2">
                     <input className={inputCls} type="tel" placeholder="Admin M-Pesa number" value={phone} onChange={(e) => setPhone(e.target.value)} />
                     <button className={btn("good")} disabled={busy} onClick={() => void payInvoice(invoice)}>

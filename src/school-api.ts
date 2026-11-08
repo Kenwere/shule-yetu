@@ -1762,7 +1762,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     if (x.role !== "Admin" && status !== "Pending")
       return c.json({ error: "Only administrators can approve or deny marks." }, 403);
     const r = await pool.query(
-      `UPDATE school_marks m SET score=$3,status=$4 FROM school_exams e WHERE m.id=$1 AND m.school_owner_id=$2 AND e.id=m.exam_id AND e.school_owner_id=m.school_owner_id AND ($5='Admin' OR (m.status='Pending' AND $4='Pending' AND EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$6 AND c.name=e.class_name AND (a.stream=e.stream OR (e.stream='*' AND EXISTS(SELECT 1 FROM school_students assigned WHERE assigned.id=m.student_id AND assigned.stream=a.stream))) AND a.subjects ? m.subject))) RETURNING m.id`,
+      `UPDATE school_marks m SET score=$3,status=$4 FROM school_exams e,school_students s WHERE m.id=$1 AND m.school_owner_id=$2 AND e.id=m.exam_id AND e.school_owner_id=m.school_owner_id AND s.id=m.student_id AND s.school_owner_id=m.school_owner_id AND (e.stream='*' OR e.stream=s.stream) AND ($5='Admin' OR ($4='Pending' AND EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$6 AND c.name=e.class_name AND a.stream=s.stream AND a.subjects ? m.subject))) RETURNING m.id`,
       [c.req.param("id"), x.schoolId, score, status, x.role, c.get("userId")],
     );
     if (!r.rowCount) return c.json({ error: "Mark not found or outside your assignment." }, 404);
@@ -1774,6 +1774,83 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         )
       ).rows[0],
     );
+  });
+  app.patch("/api/exams/:id/marks", async (c) => {
+    const x = await guard(c, "edit_exams");
+    if (!x) return c.json({ error: "Not allowed to edit marks." }, 403);
+    const body = (await c.req.json().catch(() => null)) as { marks?: unknown } | null;
+    const entries = Array.isArray(body?.marks) ? body.marks : [];
+    if (!entries.length || entries.length > 1000)
+      return c.json({ error: "Enter at least one mark to save." }, 400);
+    const normalized = entries.map((item) => {
+      const row = item as Record<string, unknown>;
+      return { id: String(row.id || ""), score: Number(row.score) };
+    });
+    if (
+      normalized.some(
+        (row) =>
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            row.id,
+          ) ||
+          !Number.isFinite(row.score) ||
+          row.score < 0 ||
+          row.score > 100,
+      ) ||
+      new Set(normalized.map((row) => row.id)).size !== normalized.length
+    )
+      return c.json({ error: "Every score must be between 0 and 100." }, 400);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const exam = await client.query(
+        'SELECT id,class_name AS "className",stream FROM school_exams WHERE id=$1 AND school_owner_id=$2 FOR UPDATE',
+        [c.req.param("id"), x.schoolId],
+      );
+      if (!exam.rowCount) {
+        await client.query("ROLLBACK");
+        return c.json({ error: "Exam not found." }, 404);
+      }
+      const saved = [];
+      for (const mark of normalized) {
+        const updated = await client.query(
+          `UPDATE school_marks m SET score=$3,status='Pending' FROM school_students s
+           WHERE m.id=$1 AND m.exam_id=$2 AND m.school_owner_id=$4 AND s.id=m.student_id AND s.school_owner_id=m.school_owner_id
+             AND ($5='Admin' OR EXISTS(
+               SELECT 1 FROM school_teacher_assignments a JOIN school_classes cl ON cl.id=a.class_id
+               WHERE a.school_owner_id=m.school_owner_id AND a.user_id=$6 AND cl.name=$7 AND a.stream=s.stream
+                 AND a.subjects ? m.subject AND ($8='*' OR $8=s.stream)
+             )) RETURNING m.id,m.student_id AS \"studentId\",s.first_name||' '||s.last_name AS student,s.admission_no AS adm,m.subject,m.score,m.status`,
+          [
+            mark.id,
+            exam.rows[0].id,
+            mark.score,
+            x.schoolId,
+            x.role,
+            c.get("userId"),
+            exam.rows[0].className,
+            exam.rows[0].stream,
+          ],
+        );
+        if (!updated.rowCount) {
+          await client.query("ROLLBACK");
+          return c.json(
+            {
+              error:
+                "One or more marks are outside your assigned class, stream, or subjects. No marks were saved.",
+            },
+            404,
+          );
+        }
+        saved.push(updated.rows[0]);
+      }
+      await client.query("COMMIT");
+      return c.json({ saved });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   });
   app.post("/api/exams/:id/approve-pending", async (c) => {
     const x = await guard(c, "edit_exams");
@@ -1802,6 +1879,16 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     } finally {
       client.release();
     }
+  });
+  app.get("/api/notifications/pending-marks", async (c) => {
+    const context = await guard(c, "view_exams");
+    if (!context) return c.json({ error: "Not allowed to view exam notifications." }, 403);
+    if (context.role !== "Admin") return c.json({ count: 0 });
+    const pending = await pool.query(
+      "SELECT count(*)::int AS count FROM school_marks WHERE school_owner_id=$1 AND status='Pending'",
+      [context.schoolId],
+    );
+    return c.json({ count: Number(pending.rows[0]?.count || 0) });
   });
   app.get("/api/exams/:id/report", async (c) => {
     const x = await guard(c, "view_exams");
@@ -2075,6 +2162,226 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     } catch {
       await client.query("ROLLBACK");
       return c.json({ error: "Could not save payment." }, 400);
+    } finally {
+      client.release();
+    }
+  });
+  app.get("/api/sms", async (c) => {
+    const context = await guard(c, "manage_settings");
+    if (!context) return c.json({ error: "Only administrators can manage SMS." }, 403);
+    const [wallet, transactions] = await Promise.all([
+      pool.query("SELECT credits FROM school_sms_wallets WHERE school_owner_id=$1", [
+        context.schoolId,
+      ]),
+      pool.query(
+        `SELECT id,transaction_type AS type,quantity,amount,status,phone_number AS "phoneNumber",mpesa_receipt AS "receipt",created_at AS "createdAt" FROM school_sms_transactions WHERE school_owner_id=$1 ORDER BY created_at DESC LIMIT 50`,
+        [context.schoolId],
+      ),
+    ]);
+    const darajaConfigured = Boolean(
+      process.env.DARAJA_CONSUMER_KEY &&
+      process.env.DARAJA_CONSUMER_SECRET &&
+      process.env.DARAJA_SHORTCODE &&
+      process.env.DARAJA_PASSKEY &&
+      process.env.DARAJA_CALLBACK_URL,
+    );
+    const olympusConfigured = Boolean(
+      process.env.OLYMPUS_SMS_API_URL &&
+      process.env.OLYMPUS_SMS_API_KEY &&
+      process.env.OLYMPUS_SMS_SENDER_ID,
+    );
+    return c.json({
+      credits: Number(wallet.rows[0]?.credits || 0),
+      pricePerSms: 1,
+      transactions: transactions.rows,
+      darajaConfigured,
+      olympusConfigured,
+    });
+  });
+  app.post("/api/sms/topups", async (c) => {
+    const context = await guard(c, "manage_settings");
+    if (!context || context.role !== "Admin")
+      return c.json({ error: "Only a school administrator can purchase SMS credits." }, 403);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const quantity = Number(body?.quantity);
+    const phoneInput = String(body?.phone || "").replace(/[\s()-]/g, "");
+    const phone = phoneInput.startsWith("0")
+      ? `254${phoneInput.slice(1)}`
+      : phoneInput.startsWith("+")
+        ? phoneInput.slice(1)
+        : phoneInput;
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100000)
+      return c.json({ error: "Choose a whole number of SMS credits from 1 to 100,000." }, 400);
+    if (!/^254[17]\d{8}$/.test(phone))
+      return c.json(
+        { error: "Enter a valid Kenyan M-Pesa number, for example 07… or 2547…." },
+        400,
+      );
+    const required = [
+      "DARAJA_CONSUMER_KEY",
+      "DARAJA_CONSUMER_SECRET",
+      "DARAJA_SHORTCODE",
+      "DARAJA_PASSKEY",
+      "DARAJA_CALLBACK_URL",
+    ];
+    if (required.some((key) => !process.env[key]))
+      return c.json({ error: "M-Pesa checkout is not configured for this app yet." }, 503);
+    const client = await pool.connect();
+    let transactionId = "";
+    try {
+      await client.query("BEGIN");
+      const transaction = await client.query(
+        `INSERT INTO school_sms_transactions(school_owner_id,transaction_type,quantity,amount,phone_number)
+         VALUES($1,'purchase',$2,$2,$3) RETURNING id`,
+        [context.schoolId, quantity, phone],
+      );
+      transactionId = transaction.rows[0].id;
+      await client.query("COMMIT");
+
+      const environment =
+        process.env.DARAJA_ENVIRONMENT === "production" ? "production" : "sandbox";
+      const apiHost =
+        environment === "production"
+          ? "https://api.safaricom.co.ke"
+          : "https://sandbox.safaricom.co.ke";
+      const credentials = Buffer.from(
+        `${process.env.DARAJA_CONSUMER_KEY}:${process.env.DARAJA_CONSUMER_SECRET}`,
+      ).toString("base64");
+      const tokenResponse = await fetch(
+        `${apiHost}/oauth/v1/generate?grant_type=client_credentials`,
+        { headers: { Authorization: `Basic ${credentials}` } },
+      );
+      const tokenBody = (await tokenResponse.json().catch(() => ({}))) as {
+        access_token?: string;
+      };
+      if (!tokenResponse.ok || !tokenBody.access_token)
+        throw new Error("Could not authenticate with M-Pesa Daraja.");
+
+      const dateParts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Africa/Nairobi",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date());
+      const part = (type: string) => dateParts.find((item) => item.type === type)?.value || "00";
+      const timestamp = `${part("year")}${part("month")}${part("day")}${part("hour")}${part("minute")}${part("second")}`;
+      const shortcode = process.env.DARAJA_SHORTCODE!;
+      const password = Buffer.from(
+        `${shortcode}${process.env.DARAJA_PASSKEY}${timestamp}`,
+      ).toString("base64");
+      const stkResponse = await fetch(`${apiHost}/mpesa/stkpush/v1/processrequest`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenBody.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          BusinessShortCode: shortcode,
+          Password: password,
+          Timestamp: timestamp,
+          TransactionType: process.env.DARAJA_TRANSACTION_TYPE || "CustomerPayBillOnline",
+          Amount: quantity,
+          PartyA: phone,
+          PartyB: shortcode,
+          PhoneNumber: phone,
+          CallBackURL: process.env.DARAJA_CALLBACK_URL,
+          AccountReference: "ShuleYetuSMS",
+          TransactionDesc: `${quantity} SMS credits`,
+        }),
+      });
+      const stkBody = (await stkResponse.json().catch(() => ({}))) as {
+        errorMessage?: string;
+        CustomerMessage?: string;
+        CheckoutRequestID?: string;
+        ResponseCode?: string;
+      };
+      if (!stkResponse.ok || stkBody.ResponseCode !== "0" || !stkBody.CheckoutRequestID)
+        throw new Error(
+          stkBody.errorMessage || stkBody.CustomerMessage || "M-Pesa STK Push failed.",
+        );
+      await pool.query(
+        "UPDATE school_sms_transactions SET checkout_request_id=$2,details=jsonb_build_object('merchantRequestId',$3) WHERE id=$1",
+        [
+          transactionId,
+          stkBody.CheckoutRequestID,
+          (stkBody as Record<string, unknown>).MerchantRequestID || "",
+        ],
+      );
+      return c.json(
+        {
+          transactionId,
+          checkoutRequestId: stkBody.CheckoutRequestID,
+          message: stkBody.CustomerMessage || "Approve the M-Pesa request on your phone.",
+        },
+        202,
+      );
+    } catch (error) {
+      await pool.query(
+        "UPDATE school_sms_transactions SET status='failed',details=jsonb_build_object('error',$2) WHERE id=$1 AND status='pending'",
+        [transactionId, error instanceof Error ? error.message : "STK push failed"],
+      );
+      return c.json(
+        { error: error instanceof Error ? error.message : "Could not start M-Pesa checkout." },
+        502,
+      );
+    } finally {
+      client.release();
+    }
+  });
+  app.post("/api/sms/mpesa/callback", async (c) => {
+    const callback = (await c.req.json().catch(() => null)) as {
+      Body?: { stkCallback?: Record<string, unknown> };
+    } | null;
+    const result = callback?.Body?.stkCallback;
+    const checkoutId = String(result?.CheckoutRequestID || "");
+    const resultCode = Number(result?.ResultCode);
+    if (!checkoutId || !Number.isInteger(resultCode))
+      return c.json({ ResultCode: 1, ResultDesc: "Invalid callback payload" }, 400);
+    const meta = result?.CallbackMetadata as
+      { Item?: { Name?: string; Value?: unknown }[] } | undefined;
+    const values = Object.fromEntries((meta?.Item || []).map((item) => [item.Name, item.Value]));
+    const receipt = String(values.MpesaReceiptNumber || "");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const transaction = await client.query(
+        "SELECT id,school_owner_id,quantity,amount,status FROM school_sms_transactions WHERE checkout_request_id=$1 FOR UPDATE",
+        [checkoutId],
+      );
+      if (transaction.rowCount && transaction.rows[0].status === "pending") {
+        const row = transaction.rows[0];
+        if (resultCode === 0 && Number(values.Amount) === Number(row.amount) && receipt) {
+          await client.query(
+            "INSERT INTO school_sms_wallets(school_owner_id,credits) VALUES($1,$2) ON CONFLICT(school_owner_id) DO UPDATE SET credits=school_sms_wallets.credits+EXCLUDED.credits,updated_at=now()",
+            [row.school_owner_id, row.quantity],
+          );
+          await client.query(
+            "UPDATE school_sms_transactions SET status='confirmed',mpesa_receipt=$2,completed_at=now(),details=details||$3::jsonb WHERE id=$1",
+            [row.id, receipt, JSON.stringify({ phoneNumber: values.PhoneNumber || null })],
+          );
+        } else {
+          await client.query(
+            "UPDATE school_sms_transactions SET status='failed',completed_at=now(),details=details||$2::jsonb WHERE id=$1",
+            [
+              row.id,
+              JSON.stringify({
+                resultCode,
+                resultDescription: result?.ResultDesc || "Payment failed",
+              }),
+            ],
+          );
+        }
+      }
+      await client.query("COMMIT");
+      return c.json({ ResultCode: 0, ResultDesc: "Accepted" });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("SMS M-Pesa callback failed", error);
+      return c.json({ ResultCode: 1, ResultDesc: "Temporary processing error" }, 500);
     } finally {
       client.release();
     }
@@ -3047,7 +3354,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
         (SELECT count(*)::int FROM school_lms_attempts at WHERE at.assessment_id=a.id) AS "attemptCount",
         (SELECT count(*)::int FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.status='in_progress') AS "openAttemptCount",
         (SELECT count(*)::int FROM school_lms_attempts at JOIN school_lms_assessment_questions aq ON aq.assessment_id=a.id JOIN school_lms_question_bank q ON q.id=aq.question_id LEFT JOIN school_lms_attempt_answers aa ON aa.attempt_id=at.id AND aa.question_id=q.id WHERE at.assessment_id=a.id AND at.status IN ('submitted','marked') AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL) AS "pendingReviewCount",
-        CASE WHEN a.results_released AND $2='Student' THEN (SELECT at.score FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid AND at.status IN ('submitted','marked') ORDER BY at.attempt_number DESC LIMIT 1) ELSE NULL END AS "releasedScore"
+        CASE WHEN $2='Student' THEN (SELECT at.score FROM school_lms_attempts at WHERE at.assessment_id=a.id AND at.student_id=$4::uuid AND at.status IN ('submitted','marked') AND (a.results_released OR NOT EXISTS (SELECT 1 FROM school_lms_attempt_answers aa JOIN school_lms_question_bank q ON q.id=aa.question_id WHERE aa.attempt_id=at.id AND q.question_type IN ('essay','matching') AND aa.marks_awarded IS NULL)) ORDER BY at.attempt_number DESC LIMIT 1) ELSE NULL END AS "releasedScore"
        FROM school_lms_assessments a JOIN school_classes cl ON cl.id=a.class_id AND cl.school_owner_id=a.school_owner_id
        WHERE a.school_owner_id=$1 AND ($2='Admin' OR ($2='Student' AND a.publication_status='published' AND EXISTS(SELECT 1 FROM school_students s WHERE s.id=$4::uuid AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND s.stream=a.stream OR s.id=$4::uuid AND a.stream='*' AND s.school_owner_id=a.school_owner_id AND s.status='Active' AND s.class_name=cl.name AND cl.subjects ? a.subject)) OR ($2='Teacher' AND EXISTS(SELECT 1 FROM school_teacher_assignments ta WHERE ta.school_owner_id=a.school_owner_id AND ta.user_id=$3 AND ta.class_id=a.class_id AND (a.stream='*' OR ta.stream=a.stream) AND ta.subjects ? a.subject)))
        ORDER BY a.starts_at NULLS FIRST,a.created_at DESC LIMIT 300`,
@@ -3343,7 +3650,15 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
       }
       if (new Date(attempt.rows[0].deadline_at).getTime() <= now) {
         await client.query(
-          "UPDATE school_lms_attempts SET status='submitted',submitted_at=now() WHERE id=$1",
+          `UPDATE school_lms_attempt_answers aa SET marks_awarded=CASE WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') AND lower(btrim(COALESCE(aa.answer#>>'{}',''))) = lower(btrim(COALESCE(q.answer_key#>>'{}',''))) THEN q.marks WHEN q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank') THEN 0 ELSE NULL END FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=$1 AND aa.attempt_id=$2 AND aa.question_id=q.id`,
+          [row.id, attempt.rows[0].id],
+        );
+        await client.query(
+          `UPDATE school_lms_attempt_answers aa SET marks_awarded=0 FROM school_lms_assessment_questions aq JOIN school_lms_question_bank q ON q.id=aq.question_id WHERE aq.assessment_id=$1 AND aq.question_id=q.id AND aa.attempt_id=$2 AND aa.question_id=q.id AND aa.marks_awarded IS NULL AND q.question_type IN ('multiple_choice','true_false','short_answer','fill_blank')`,
+          [row.id, attempt.rows[0].id],
+        );
+        await client.query(
+          `UPDATE school_lms_attempts SET status='submitted',submitted_at=deadline_at,score=(SELECT COALESCE(sum(marks_awarded),0) FROM school_lms_attempt_answers WHERE attempt_id=$1) WHERE id=$1`,
           [attempt.rows[0].id],
         );
         await client.query("COMMIT");

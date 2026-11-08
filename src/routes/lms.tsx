@@ -1222,9 +1222,18 @@ function LearningPage() {
               <h2 className="eyebrow text-ink-soft">Marking assessment</h2>
               <p className="mt-1 font-display text-xl">{activeReviewAssessment.title}</p>
             </div>
-            <button className={btn("ghost")} onClick={() => setActiveReviewAssessment(null)}>
-              Close
-            </button>
+            <div className="flex gap-2 print:hidden">
+              <button
+                className={btn("ghost")}
+                disabled={!reviewAttempts.length}
+                onClick={() => window.print()}
+              >
+                Print score sheet
+              </button>
+              <button className={btn("ghost")} onClick={() => setActiveReviewAssessment(null)}>
+                Close
+              </button>
+            </div>
           </div>
           <div className="mt-4 space-y-4">
             {reviewAttempts.map((attempt) => (
@@ -1347,6 +1356,46 @@ function LearningPage() {
             )}
           </div>
         </section>
+      )}
+      {activeReviewAssessment && (
+        <>
+          <style>{`@media print{body *{visibility:hidden!important}#lms-assessment-score-print,#lms-assessment-score-print *{visibility:visible!important}#lms-assessment-score-print{display:block!important;position:fixed;inset:0;background:#fff;color:#111;padding:12mm;z-index:99999}#lms-assessment-score-print table{width:100%;border-collapse:collapse}#lms-assessment-score-print th,#lms-assessment-score-print td{border:1px solid #333;padding:6px;text-align:left}}`}</style>
+          <section id="lms-assessment-score-print" className="hidden" aria-hidden="true">
+            <h1 className="mb-1 text-xl font-bold">{activeReviewAssessment.title} — Score sheet</h1>
+            <p className="mb-5 text-sm">
+              {activeReviewAssessment.className} · {activeReviewAssessment.subject} · Maximum score:{" "}
+              {activeReviewAssessment.maxMarks}
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Admission number</th>
+                  <th>Attempt</th>
+                  <th>Status</th>
+                  <th>Submitted</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewAttempts.map((attempt) => (
+                  <tr key={attempt.id}>
+                    <td>{attempt.studentName}</td>
+                    <td>{attempt.admissionNo}</td>
+                    <td>{attempt.attemptNumber}</td>
+                    <td>{attempt.status}</td>
+                    <td>
+                      {attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : "—"}
+                    </td>
+                    <td>
+                      {attempt.score ?? "Pending"} / {activeReviewAssessment.maxMarks}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </>
       )}
       <section className="mt-7 grid items-start gap-6 xl:grid-cols-2">
         <Panel title="Reusable question bank">

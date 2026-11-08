@@ -1,4 +1,4 @@
-import { authClient } from "./auth-client";
+import { getAuthToken } from "./auth-client";
 import { toast } from "sonner";
 
 const apiBase = import.meta.env.VITE_NEON_FUNCTION_HELLO_URL;
@@ -8,7 +8,13 @@ const parentSessionKey = "shule-yetu-parent-session";
 function notifyMutationSuccess(init: RequestInit) {
   const method = (init.method || "GET").toUpperCase();
   if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-    toast.success(method === "DELETE" ? "Deleted successfully" : method === "POST" ? "Completed successfully" : "Changes saved successfully");
+    toast.success(
+      method === "DELETE"
+        ? "Deleted successfully"
+        : method === "POST"
+          ? "Completed successfully"
+          : "Changes saved successfully",
+    );
   }
 }
 
@@ -64,7 +70,9 @@ export async function logoutForInactivity(): Promise<string | null> {
         method: "POST",
         headers: { Authorization: `Bearer ${studentToken}` },
       });
-    } catch { /* Clear the local session even if the server cannot be reached. */ }
+    } catch {
+      /* Clear the local session even if the server cannot be reached. */
+    }
   }
   if (base && parentToken) {
     try {
@@ -72,12 +80,18 @@ export async function logoutForInactivity(): Promise<string | null> {
         method: "POST",
         headers: { Authorization: `Bearer ${parentToken}` },
       });
-    } catch { /* Clear the local session even if the server cannot be reached. */ }
+    } catch {
+      /* Clear the local session even if the server cannot be reached. */
+    }
   }
   saveStudentToken(null);
   saveParentToken(null);
   if (staffSession) {
-    try { await authClient.signOut(); } catch { /* The app will still leave the protected page. */ }
+    try {
+      await authClient.signOut();
+    } catch {
+      /* The app will still leave the protected page. */
+    }
     return "/login";
   }
   if (studentToken) return "/student-login";
@@ -186,9 +200,8 @@ export async function neonApi(path: string, init: RequestInit = {}) {
     toast.error(error.message);
     throw error;
   }
-  const { data, error } = await authClient.getSession();
-  const token = data?.session.token;
-  if (error || !token) {
+  const token = await getAuthToken();
+  if (!token) {
     const sessionError = new Error("Please sign in to use the school portal.");
     toast.error(sessionError.message);
     throw sessionError;

@@ -46,7 +46,6 @@ const blankDraft = (): Draft => ({
 function ClassesPage() {
   const [rows, setRows] = useState<ClassRow[]>([]);
   const [draft, setDraft] = useState<Draft>(blankDraft());
-  const [term, setTerm] = useState("");
   const [flash, setFlash] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -133,24 +132,6 @@ function ClassesPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete class.");
-    }
-  }
-  async function generate(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    setFlash("");
-    try {
-      const r = await neonApi("/api/classes/generate-fees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ term }),
-      });
-      const d = await r.json();
-      setFlash(
-        `${d.created} fee obligations created for ${d.term}. Existing obligations were left unchanged.`,
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not generate fees.");
     }
   }
   return (
@@ -329,22 +310,6 @@ function ClassesPage() {
             <button className={btn()} disabled={busy}>
               {busy ? "Saving..." : "Add class"}
             </button>
-          </form>
-        </Panel>
-        <Panel title="Generate fee obligations">
-          <p className="mb-3 text-sm text-ink-soft">
-            Create one new fee ledger row for each active student using their class and stream fee.
-            Previous balances remain in the ledger and are carried forward automatically.
-          </p>
-          <form onSubmit={generate} className="flex flex-wrap gap-2">
-            <input
-              required
-              className={`${inputCls} min-w-48 flex-1`}
-              placeholder="Term 1 2027"
-              value={term}
-              onChange={(e) => setTerm(e.target.value)}
-            />
-            <button className={btn()}>Generate term fees</button>
           </form>
         </Panel>
       </div>

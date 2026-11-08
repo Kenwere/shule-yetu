@@ -63,6 +63,7 @@ function ExamMarksPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dirtyMarks, setDirtyMarks] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -89,6 +90,7 @@ function ExamMarksPage() {
         throw new Error("This exam is unavailable or your account is not assigned to its class.");
       setExam(found);
       setMarks(markRows);
+      setDirtyMarks([]);
       setRole(me.role || "");
       setSubjects(
         me.role === "Admin"
@@ -140,6 +142,31 @@ function ExamMarksPage() {
       setMessage(`${mark.student} · ${mark.subject} saved.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save this mark.");
+    } finally {
+      setSaving("");
+    }
+  }
+
+  async function saveAllMarks() {
+    const changed = marks.filter((mark) => dirtyMarks.includes(mark.id));
+    if (!changed.length) return;
+    setSaving("all");
+    setError("");
+    setMessage("");
+    try {
+      const response = await neonApi(`/api/exams/${examId}/marks`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marks: changed.map(({ id, score }) => ({ id, score })) }),
+      });
+      const result = (await response.json()) as { saved?: Mark[]; error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not save marks.");
+      const saved = result.saved || [];
+      setMarks((old) => old.map((mark) => saved.find((row) => row.id === mark.id) || mark));
+      setDirtyMarks([]);
+      setMessage(`${saved.length} mark${saved.length === 1 ? "" : "s"} saved for approval.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save marks.");
     } finally {
       setSaving("");
     }
@@ -236,10 +263,21 @@ function ExamMarksPage() {
           </Panel>
           <Panel title="Enter marks by subject">
             {subjects.length > 0 && (
-              <p className="mb-3 text-sm text-ink-soft">
-                Subjects run horizontally. Save each score after entering it. Teacher marks are
-                submitted for admin approval.
-              </p>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-ink-soft">
+                  Subjects run horizontally. Teacher marks are submitted for admin approval.
+                </p>
+                <button
+                  type="button"
+                  className={btn("primary")}
+                  disabled={!dirtyMarks.length || saving === "all"}
+                  onClick={() => void saveAllMarks()}
+                >
+                  {saving === "all"
+                    ? "Saving marks…"
+                    : `Save all marks${dirtyMarks.length ? ` (${dirtyMarks.length})` : ""}`}
+                </button>
+              </div>
             )}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -275,29 +313,21 @@ function ExamMarksPage() {
                                   step="0.01"
                                   className={inputCls}
                                   value={mark.score}
-                                  onChange={(event) =>
+                                  onChange={(event) => {
                                     setMarks((old) =>
                                       old.map((item) =>
                                         item.id === mark.id
                                           ? { ...item, score: Number(event.target.value) }
                                           : item,
                                       ),
-                                    )
-                                  }
+                                    );
+                                    setDirtyMarks((old) =>
+                                      old.includes(mark.id) ? old : [...old, mark.id],
+                                    );
+                                  }}
                                 />
                                 <span className="text-xs text-ink-soft">{mark.status}</span>
                                 <div className="flex flex-wrap gap-1">
-                                  <button
-                                    className={btn("ghost")}
-                                    disabled={saving === mark.id}
-                                    onClick={() => void update(mark, { status: "Pending" })}
-                                  >
-                                    {saving === mark.id
-                                      ? "Saving…"
-                                      : role === "Admin"
-                                        ? "Save"
-                                        : "Save for approval"}
-                                  </button>
                                   {role === "Admin" && mark.status !== "Approved" && (
                                     <button
                                       className={btn("good")}

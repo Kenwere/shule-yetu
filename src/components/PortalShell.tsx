@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { neonApi } from "@/lib/neon-api";
 import { authClient } from "@/lib/auth-client";
-import { UserRound } from "lucide-react";
+import { Bell, UserRound } from "lucide-react";
 
 export function SignInRequired() {
   return (
@@ -44,6 +44,7 @@ export function PortalShell({
     avatarUrl?: string;
   } | null>(null);
   const [checked, setChecked] = useState(false);
+  const [pendingMarks, setPendingMarks] = useState(0);
 
   useEffect(() => {
     void authClient
@@ -60,6 +61,29 @@ export function PortalShell({
       .finally(() => setChecked(true));
   }, []);
 
+  useEffect(() => {
+    if (user?.role !== "Admin") {
+      setPendingMarks(0);
+      return;
+    }
+    let active = true;
+    const loadNotifications = async () => {
+      try {
+        const response = await neonApi("/api/notifications/pending-marks");
+        const result = (await response.json()) as { count?: number };
+        if (active) setPendingMarks(Number(result.count || 0));
+      } catch {
+        if (active) setPendingMarks(0);
+      }
+    };
+    void loadNotifications();
+    const interval = window.setInterval(() => void loadNotifications(), 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.role]);
+
   if (!checked) return null;
   if (!user) return <SignInRequired />;
 
@@ -75,6 +99,23 @@ export function PortalShell({
           </div>
           <div className="ml-auto flex items-center gap-3">
             {actions}
+            {user.role === "Admin" && (
+              <Link
+                to="/exams"
+                aria-label={
+                  pendingMarks ? `${pendingMarks} marks awaiting approval` : "Exam approvals"
+                }
+                title={pendingMarks ? `${pendingMarks} marks awaiting approval` : "Exam approvals"}
+                className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink/20 bg-white text-ink hover:ring-2 hover:ring-gold"
+              >
+                <Bell size={18} />
+                {pendingMarks > 0 && (
+                  <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-owed px-1 text-[10px] font-bold text-white">
+                    {pendingMarks > 99 ? "99+" : pendingMarks}
+                  </span>
+                )}
+              </Link>
+            )}
             <Link
               to="/profile"
               aria-label="Open your profile"

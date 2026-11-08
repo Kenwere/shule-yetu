@@ -812,11 +812,11 @@ function StudentLearningPage() {
                 {assessment.instructions && (
                   <p className="mt-3 whitespace-pre-wrap text-sm">{assessment.instructions}</p>
                 )}
-                {assessment.resultsReleased && (
+                {assessment.attemptsUsed > 0 && (
                   <p className="mt-2 text-sm text-ink-soft">
                     {assessment.releasedScore !== null && assessment.releasedScore !== undefined
-                      ? `Released score: ${assessment.releasedScore} / ${assessment.maxMarks}`
-                      : "Your submitted result is being marked."}
+                      ? `${assessment.resultsReleased ? "Final score" : "Automatic score"}: ${assessment.releasedScore} / ${assessment.maxMarks}`
+                      : "Your score appears after submission; written answers may need teacher marking."}
                   </p>
                 )}
                 <button

@@ -77,6 +77,7 @@ app.use("/api/*", async (c, next) => {
   if (
     c.req.path === "/api/lms/auth/login" ||
     c.req.path === "/api/lms/parent/auth/login" ||
+    c.req.path === "/api/sms/mpesa/callback" ||
     /^\/api\/staff\/invitation\/[^/]+$/.test(c.req.path)
   )
     return await next();

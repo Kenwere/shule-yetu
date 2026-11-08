@@ -28,6 +28,32 @@ export default defineConfig({
         ...(process.env.SUPER_ADMIN_EMAILS
           ? { SUPER_ADMIN_EMAILS: process.env.SUPER_ADMIN_EMAILS }
           : {}),
+        ...(process.env.DARAJA_ENVIRONMENT
+          ? { DARAJA_ENVIRONMENT: process.env.DARAJA_ENVIRONMENT }
+          : {}),
+        ...(process.env.DARAJA_CONSUMER_KEY
+          ? { DARAJA_CONSUMER_KEY: process.env.DARAJA_CONSUMER_KEY }
+          : {}),
+        ...(process.env.DARAJA_CONSUMER_SECRET
+          ? { DARAJA_CONSUMER_SECRET: process.env.DARAJA_CONSUMER_SECRET }
+          : {}),
+        ...(process.env.DARAJA_SHORTCODE ? { DARAJA_SHORTCODE: process.env.DARAJA_SHORTCODE } : {}),
+        ...(process.env.DARAJA_PASSKEY ? { DARAJA_PASSKEY: process.env.DARAJA_PASSKEY } : {}),
+        ...(process.env.DARAJA_CALLBACK_URL
+          ? { DARAJA_CALLBACK_URL: process.env.DARAJA_CALLBACK_URL }
+          : {}),
+        ...(process.env.DARAJA_TRANSACTION_TYPE
+          ? { DARAJA_TRANSACTION_TYPE: process.env.DARAJA_TRANSACTION_TYPE }
+          : {}),
+        ...(process.env.OLYMPUS_SMS_API_URL
+          ? { OLYMPUS_SMS_API_URL: process.env.OLYMPUS_SMS_API_URL }
+          : {}),
+        ...(process.env.OLYMPUS_SMS_API_KEY
+          ? { OLYMPUS_SMS_API_KEY: process.env.OLYMPUS_SMS_API_KEY }
+          : {}),
+        ...(process.env.OLYMPUS_SMS_SENDER_ID
+          ? { OLYMPUS_SMS_SENDER_ID: process.env.OLYMPUS_SMS_SENDER_ID }
+          : {}),
       },
     },
   },

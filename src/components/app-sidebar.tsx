@@ -19,6 +19,7 @@ import {
   CreditCard,
   ShieldCheck,
   ArrowUpFromLine,
+  Smartphone,
 } from "lucide-react";
 
 import {
@@ -54,6 +55,7 @@ const portalItems: { title: string; url: PortalPath; icon: typeof LayoutDashboar
   { title: "Promotions", url: "/promotions", icon: ArrowUpFromLine },
   { title: "Announcements", url: "/announcements", icon: Megaphone },
   { title: "Fees", url: "/fees", icon: Receipt },
+  { title: "SMS", url: "/sms", icon: Smartphone },
   { title: "Attendance", url: "/attendance", icon: CalendarCheck2 },
   { title: "Teachers", url: "/teachers", icon: Users },
   { title: "Accounts", url: "/accounts", icon: Users },
@@ -106,6 +108,7 @@ export function AppSidebar() {
     "/promotions": "edit_students",
     "/announcements": "view_announcements",
     "/fees": "view_fees",
+    "/sms": "manage_settings",
     "/attendance": "view_attendance",
     "/teachers": "manage_staff",
     "/accounts": "manage_staff",
@@ -122,6 +125,7 @@ export function AppSidebar() {
       user?.role !== "Student" &&
       (item.url !== "/super-admin" || isPlatformAdmin) &&
       (item.url === "/super-admin" || item.url === "/billing" ? user?.role === "Admin" : true) &&
+      (item.url !== "/sms" || user?.role === "Admin") &&
       (item.url !== "/accounts" || user?.role === "Admin") &&
       (item.url === "/super-admin" ||
         user?.role === "Admin" ||

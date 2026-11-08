@@ -30,6 +30,7 @@ import { Route as ReportCardsRouteImport } from './routes/report-cards'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SmsRouteImport } from './routes/sms'
 import { Route as StudentRouteImport } from './routes/student'
 import { Route as StudentLoginRouteImport } from './routes/student-login'
 import { Route as StudentsRouteImport } from './routes/students'
@@ -144,6 +145,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SmsRoute = SmsRouteImport.update({
+  id: '/sms',
+  path: '/sms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StudentRoute = StudentRouteImport.update({
   id: '/student',
   path: '/student',
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sms': typeof SmsRoute
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
@@ -238,6 +245,7 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sms': typeof SmsRoute
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
@@ -270,6 +278,7 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sms': typeof SmsRoute
   '/student': typeof StudentRoute
   '/student-login': typeof StudentLoginRoute
   '/students': typeof StudentsRouteWithChildren
@@ -303,6 +312,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/reset-password'
     | '/settings'
+    | '/sms'
     | '/student'
     | '/student-login'
     | '/students'
@@ -334,6 +344,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/reset-password'
     | '/settings'
+    | '/sms'
     | '/student'
     | '/student-login'
     | '/students'
@@ -365,6 +376,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/reset-password'
     | '/settings'
+    | '/sms'
     | '/student'
     | '/student-login'
     | '/students'
@@ -397,6 +409,7 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
+  SmsRoute: typeof SmsRoute
   StudentRoute: typeof StudentRoute
   StudentLoginRoute: typeof StudentLoginRoute
   StudentsRoute: typeof StudentsRouteWithChildren
@@ -554,6 +567,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sms': {
+      id: '/sms'
+      path: '/sms'
+      fullPath: '/sms'
+      preLoaderRoute: typeof SmsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/student': {
       id: '/student'
       path: '/student'
@@ -657,6 +677,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  SmsRoute: SmsRoute,
   StudentRoute: StudentRoute,
   StudentLoginRoute: StudentLoginRoute,
   StudentsRoute: StudentsRouteWithChildren,

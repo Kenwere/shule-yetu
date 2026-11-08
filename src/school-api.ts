@@ -1362,7 +1362,7 @@ export function mountSchoolApi(app: Hono<ApiEnv>, pool: Pool) {
     const x = await guard(c, "view_exams");
     if (!x) return c.json({ error: "Not allowed to view exams." }, 403);
     const r = await pool.query(
-      `SELECT e.id,e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",e.starts_on AS "startsOn",e.ends_on AS "endsOn",(SELECT subjects FROM school_classes WHERE school_owner_id=e.school_owner_id AND name=e.class_name) AS subjects,count(m.id) FILTER(WHERE m.status='Pending') AS pending FROM school_exams e LEFT JOIN school_marks m ON m.exam_id=e.id WHERE e.school_owner_id=$1 AND ($2='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=e.school_owner_id AND a.user_id=$3 AND c.name=e.class_name AND (a.stream=e.stream OR e.stream='*'))) GROUP BY e.id ORDER BY e.created_at DESC`,
+      `SELECT e.id,e.name,e.class_name AS "className",e.stream,e.term,e.academic_year AS "academicYear",e.created_at AS "createdAt",e.starts_on AS "startsOn",e.ends_on AS "endsOn",(SELECT subjects FROM school_classes WHERE school_owner_id=e.school_owner_id AND name=e.class_name) AS subjects,count(m.id) FILTER(WHERE m.status='Pending') AS pending FROM school_exams e LEFT JOIN school_marks m ON m.exam_id=e.id WHERE e.school_owner_id=$1 AND ($2='Admin' OR EXISTS(SELECT 1 FROM school_teacher_assignments a JOIN school_classes c ON c.id=a.class_id WHERE a.school_owner_id=e.school_owner_id AND a.user_id=$3 AND c.name=e.class_name AND (a.stream=e.stream OR e.stream='*'))) GROUP BY e.id ORDER BY e.created_at DESC`,
       [x.schoolId, x.role, c.get("userId")],
     );
     return c.json(r.rows);

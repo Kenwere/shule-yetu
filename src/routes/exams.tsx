@@ -11,6 +11,7 @@ type Exam = {
   stream: string;
   term: string;
   academicYear: string;
+  createdAt?: string;
   startsOn: string;
   endsOn: string;
   pending: number;
@@ -62,6 +63,7 @@ function ExamsPage() {
   const [reportLoading, setReportLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingMark, setSavingMark] = useState("");
+  const [examPeriod, setExamPeriod] = useState<"this" | "previous">("this");
   const marksPanelRef = useRef<HTMLElement | null>(null);
   const reportPanelRef = useRef<HTMLElement | null>(null);
   const [draft, setDraft] = useState({
@@ -242,6 +244,10 @@ function ExamsPage() {
     window.setTimeout(() => window.print(), 50);
   }
   const selected = exams.find((x) => x.id === examId);
+  const visibleExams = exams.filter((exam) => {
+    const year = new Date(exam.createdAt || `${exam.academicYear}-01-01`).getFullYear();
+    return examPeriod === "this" ? year === new Date().getFullYear() : year < new Date().getFullYear();
+  });
   return (
     <PortalShell
       eyebrow="Academics"
@@ -264,6 +270,10 @@ function ExamsPage() {
       )}
       <div className="grid gap-6 lg:grid-cols-3">
         <Panel title="School exams" className="lg:col-span-2">
+          <div className="mb-3 inline-flex rounded-md border border-ink/15 p-1 print:hidden" role="group" aria-label="Filter exams by creation year">
+            <button type="button" aria-pressed={examPeriod === "this"} className={btn(examPeriod === "this" ? "good" : "ghost")} onClick={() => setExamPeriod("this")}>This year</button>
+            <button type="button" aria-pressed={examPeriod === "previous"} className={btn(examPeriod === "previous" ? "good" : "ghost")} onClick={() => setExamPeriod("previous")}>Previous years</button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -276,7 +286,7 @@ function ExamsPage() {
                 </tr>
               </thead>
               <tbody>
-                {exams.map((x) => (
+                {visibleExams.map((x) => (
                   <tr key={x.id}>
                     <td className={tdCls}>{x.name}</td>
                     <td className={tdCls}>
@@ -309,11 +319,10 @@ function ExamsPage() {
                     </td>
                   </tr>
                 ))}
-                {!exams.length && (
+                {!visibleExams.length && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-ink-soft">
-                      No exams are available for your account. Teachers may only see exams for their
-                      assigned class and stream.
+                      No {examPeriod === "this" ? "exams created this year" : "exams from previous years"} are available for your account.
                     </td>
                   </tr>
                 )}

@@ -1,8 +1,16 @@
 import { authClient } from "./auth-client";
+import { toast } from "sonner";
 
 const apiBase = import.meta.env.VITE_NEON_FUNCTION_HELLO_URL;
 const studentSessionKey = "shule-yetu-student-session";
 const parentSessionKey = "shule-yetu-parent-session";
+
+function notifyMutationSuccess(init: RequestInit) {
+  const method = (init.method || "GET").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    toast.success(method === "DELETE" ? "Deleted successfully" : method === "POST" ? "Completed successfully" : "Changes saved successfully");
+  }
+}
 
 export async function getStaffInvitation(code: string) {
   if (!apiBase) throw new Error("Neon Functions URL is not configured.");
@@ -51,8 +59,13 @@ export async function parentLogin(email: string, password: string, schoolName = 
     error?: string;
     mustChangePassword?: boolean;
   };
-  if (!response.ok || !result.token) throw new Error(result.error || "Parent login failed.");
+  if (!response.ok || !result.token) {
+    const message = result.error || "Parent login failed.";
+    toast.error(message);
+    throw new Error(message);
+  }
   saveParentToken(result.token);
+  toast.success("Signed in successfully");
   return result;
 }
 export async function parentApi(path: string, init: RequestInit = {}) {
@@ -73,8 +86,10 @@ export async function parentApi(path: string, init: RequestInit = {}) {
     } catch {
       // Keep the server's plain-text error.
     }
+    toast.error(detail || `Neon API returned ${response.status}.`);
     throw new Error(detail || `Neon API returned ${response.status}.`);
   }
+  notifyMutationSuccess(init);
   return response;
 }
 
@@ -92,8 +107,13 @@ export async function studentLogin(admissionNo: string, password: string, school
     mustChangePassword?: boolean;
     student?: { firstName: string; lastName: string };
   };
-  if (!response.ok || !result.token) throw new Error(result.error || "Student login failed.");
+  if (!response.ok || !result.token) {
+    const message = result.error || "Student login failed.";
+    toast.error(message);
+    throw new Error(message);
+  }
   saveStudentToken(result.token);
+  toast.success("Signed in successfully");
   return result;
 }
 
@@ -115,21 +135,38 @@ export async function studentApi(path: string, init: RequestInit = {}) {
     } catch {
       // Preserve a plain-text server error.
     }
+    toast.error(detail || `Neon API returned ${response.status}.`);
     throw new Error(detail || `Neon API returned ${response.status}.`);
   }
+  notifyMutationSuccess(init);
   return response;
 }
 
 export async function neonApi(path: string, init: RequestInit = {}) {
-  if (!apiBase) throw new Error("Neon Functions URL is not configured.");
+  if (!apiBase) {
+    const error = new Error("Neon Functions URL is not configured.");
+    toast.error(error.message);
+    throw error;
+  }
   const { data, error } = await authClient.getSession();
   const token = data?.session.token;
-  if (error || !token) throw new Error("Please sign in to use the school portal.");
+  if (error || !token) {
+    const sessionError = new Error("Please sign in to use the school portal.");
+    toast.error(sessionError.message);
+    throw sessionError;
+  }
 
   const headers = new Headers(init.headers);
   headers.set("Authorization", "Bearer " + token);
   const url = new URL(path.replace(/^\//, ""), apiBase.endsWith("/") ? apiBase : apiBase + "/");
-  const response = await fetch(url, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, headers });
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : "Network request failed.";
+    toast.error(message);
+    throw cause;
+  }
   if (!response.ok) {
     const raw = await response.text();
     let detail = raw;
@@ -140,7 +177,10 @@ export async function neonApi(path: string, init: RequestInit = {}) {
     } catch {
       // Keep plain-text API errors readable.
     }
-    throw new Error(`${path} failed (${response.status}): ${detail || response.statusText || "Neon API request failed."}`);
+    const message = `${detail || response.statusText || "Neon API request failed."}`;
+    toast.error(message);
+    throw new Error(`${path} failed (${response.status}): ${message}`);
   }
+  notifyMutationSuccess(init);
   return response;
 }
